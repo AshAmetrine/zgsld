@@ -30,10 +30,9 @@ pub fn main() !void {
         return;
     }
 
-    // Since this is standalone, it'd be a good idea to pass args for the greeter to handle now.
-    // the greeter can return true/false whether to continue with the session manager.
-    
-    if (try Greeter.handleInitialArgs(allocator)) return;
+    // Since this is standalone, 
+    // pass args for the greeter to handle now (help,version,verify).
+    try Greeter.handleInitialArgs(allocator);
 
     std.debug.print("Session Manager Started\n",.{});
 
