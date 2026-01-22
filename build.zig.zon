@@ -1,0 +1,19 @@
+.{
+    .name = .zgsld,
+    .version = "0.0.0",
+    .fingerprint = 0x691972a6afdfe43, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
+            .hash = "1220cf08a633c05eeb3b7a8317045c0f7f50d0300b9534b3e47ede19c033780ef824",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        "README.md",
+    },
+}
