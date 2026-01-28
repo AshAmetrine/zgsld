@@ -62,6 +62,44 @@ pub const Pam = struct {
         self.status = pam.pam_set_item(self.handle, item_type, str.ptr);
         if (self.status != pam.PAM_SUCCESS) return pamDiagnose(self.status);
     }
+
+    pub fn putEnv(self: *Pam, kv: [:0]const u8) !void {
+        self.status = pam.pam_putenv(self.handle, kv);
+        if (self.status != pam.PAM_SUCCESS) return pamDiagnose(self.status);
+    }
+
+    fn getEnvList(self: *Pam) ?[*:null]?[*:0]u8 {
+        return pam.pam_getenvlist(self.handle);
+    }
+
+    fn freeEnvList(env_list: ?[*:null]?[*:0]u8) void {
+        const list = env_list orelse return;
+        var i: usize = 0;
+        while (list[i]) |entry| : (i += 1) {
+            std.c.free(@ptrCast(entry));
+        }
+        std.c.free(@ptrCast(list));
+    }
+
+    pub fn createEnvListMap(self: *Pam, allocator: std.mem.Allocator) !std.process.EnvMap {
+        var env_map = std.process.EnvMap.init(allocator);
+        errdefer env_map.deinit();
+
+        const env_list = self.getEnvList();
+        defer freeEnvList(env_list);
+
+        if (env_list) |list| {
+            var i: usize = 0;
+            while (list[i]) |entry| : (i += 1) {
+                const s = std.mem.span(entry);
+                const eq = std.mem.indexOfScalar(u8, s, '=') orelse continue;
+                if (eq == 0) continue;
+                try env_map.put(s[0..eq],s[eq+1..]);
+            }
+        }
+
+        return env_map;
+    }
 };
 
 fn loginConv(
@@ -189,3 +227,5 @@ fn pamDiagnose(status: c_int) PamError {
         else => unreachable,
     };
 }
+
+

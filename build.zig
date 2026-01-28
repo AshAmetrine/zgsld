@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const service_name = b.option([]const u8, "service-name","Set PAM service name") orelse "zgsld";
+    const service_name = b.option([]const u8, "service-name","Set PAM service name") orelse "login";
     const greeter_user = b.option([]const u8, "greeter-user","User that runs the greeter") orelse "greeter";
    
     const build_options = b.addOptions();

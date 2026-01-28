@@ -10,6 +10,7 @@ pub fn main() !void {
         \\-h, --help                Shows all commands.
         \\-v, --version             Shows the version of zgsld.
         \\--greeter-path <str>      Sets the greeter path
+        \\--vt <u8>                Sets the VT number
     ;
 
     const params = comptime clap.parseParamsComptime(paramStr);
@@ -44,9 +45,10 @@ pub fn main() !void {
     };
     defer allocator.free(greeter_path);
 
-    try session_manager.run(.{
+    try session_manager.run(allocator, .{
         .service_name = build_options.service_name,
         .greeter_path = greeter_path,
         .greeter_user = build_options.greeter_user,
+        .vt = res.args.vt,
     });
 }

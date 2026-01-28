@@ -6,14 +6,10 @@ const Greeter = @import("greeter").Greeter;
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
+    // Check for fd from ZGSLD_SOCK
     var sock_fd: ?std.posix.fd_t = null;
-    for (args[1..], 1..) |arg, i| {
-        if (std.mem.eql(u8, arg, "--sock-fd")) {
-            sock_fd = try std.fmt.parseInt(std.posix.fd_t, args[i + 1], 10);
-        }
+    if (std.posix.getenv("ZGSLD_SOCK")) |sock| {
+        sock_fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
     }
 
     if (sock_fd) |fd| {
@@ -46,7 +42,7 @@ pub fn main() !void {
 
     std.debug.print("Greeter User: {s}\nPam Service Name: {s}\n",.{greeter_user,service_name});
 
-    try session_manager.run(.{
+    try session_manager.run(allocator, .{
         .greeter_path = self_exe_path_z,
         .greeter_user = greeter_user,
         .service_name = service_name,

@@ -16,6 +16,28 @@ const IpcEventType = enum {
     pam_request,
     pam_response,
     pam_auth_result,
+    start_session,
+    set_session_env,
+};
+
+pub const SessionType = enum(u8) {
+    Command = 0,
+    X11 = 1,
+};
+
+pub const SessionCommand = struct {
+    // NUL-separated argv with a trailing NUL.
+    argv: []const u8,
+};
+
+pub const SessionInfo = union(SessionType) {
+    Command: SessionCommand,
+    X11: SessionCommand,
+};
+
+pub const SessionEnvVar = struct {
+    key: []const u8,
+    value: []const u8,
 };
 
 pub const PamConvRequest = struct {
@@ -38,6 +60,8 @@ pub const IpcEvent = union(IpcEventType) {
     pam_request: PamConvRequest,
     pam_response: PamConvResponse,
     pam_auth_result: PamAuthResult,
+    start_session: SessionInfo,
+    set_session_env: SessionEnvVar,
 };
 
 pub const Ipc = struct {
@@ -126,6 +150,28 @@ pub const Ipc = struct {
                 const ok = event_buf[0] != 0;
                 break :blk IpcEvent{ .pam_auth_result = .{ .ok = ok } };
             },
+            .start_session => blk: {
+                if (payload_len < 2) return error.InvalidPayload;
+                const session_type: SessionType = @enumFromInt(event_buf[0]);
+                const argv = event_buf[1..payload_len];
+                if (argv[0] == 0) return error.InvalidPayload;
+                if (argv[argv.len - 1] != 0) return error.InvalidPayload;
+                break :blk switch (session_type) {
+                    .Command => IpcEvent{ .start_session = .{ .Command = .{ .argv = argv } } },
+                    .X11 => IpcEvent{ .start_session = .{ .X11 = .{ .argv = argv } } },
+                };
+            },
+            .set_session_env => blk: {
+                const env_bytes = event_buf[0..payload_len];
+                const eq = std.mem.indexOfScalar(u8, env_bytes, '=') orelse return error.InvalidPayload;
+                if (eq == 0) return error.InvalidPayload;
+                break :blk IpcEvent{
+                    .set_session_env = .{
+                        .key = env_bytes[0..eq],
+                        .value = env_bytes[eq + 1 .. payload_len],
+                    },
+                };
+            },
         };
     }
 
@@ -162,6 +208,36 @@ pub const Ipc = struct {
                 try self.writeHeader(.pam_auth_result, 1);
                 const ok_byte: u8 = if (result.ok) 1 else 0;
                 try writer.writeAll(&[_]u8{ok_byte});
+            },
+            .start_session => |info| {
+                switch (info) {
+                    .Command => |cmd| {
+                        if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
+                            return error.InvalidPayload;
+                        }
+                        const payload_len: u32 = @intCast(cmd.argv.len + 1);
+                        try self.writeHeader(.start_session, payload_len);
+                        try writer.writeAll(&[_]u8{@intFromEnum(SessionType.Command)});
+                        try writer.writeAll(cmd.argv);
+                    },
+                    .X11 => |cmd| {
+                        if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
+                            return error.InvalidPayload;
+                        }
+                        const payload_len: u32 = @intCast(cmd.argv.len + 1);
+                        try self.writeHeader(.start_session, payload_len);
+                        try writer.writeAll(&[_]u8{@intFromEnum(SessionType.X11)});
+                        try writer.writeAll(cmd.argv);
+                    },
+                }
+            },
+            .set_session_env => |env| {
+                if (std.mem.indexOfScalar(u8, env.key, '=') != null) return error.InvalidPayload;
+                const payload_len: u32 = @intCast(env.key.len + 1 + env.value.len);
+                try self.writeHeader(.set_session_env, payload_len);
+                try writer.writeAll(env.key);
+                try writer.writeAll("=");
+                try writer.writeAll(env.value);
             },
         }
     }
