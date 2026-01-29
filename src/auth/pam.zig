@@ -7,6 +7,8 @@ pub const pam = @cImport({
 pub const PamCtx = struct {
     user: [:0]const u8,
     ipc: *ipc.Ipc,
+    reader: *std.Io.Reader,
+    writer: *std.Io.Writer,
 };
 
 pub const Pam = struct {
@@ -121,8 +123,11 @@ fn loginConv(
     var status: c_int = pam.PAM_SUCCESS;
 
     const ctx: *PamCtx = @ptrCast(@alignCast(appdata_ptr));
+    const ipc_reader = ctx.reader;
+    const ipc_writer = ctx.writer;
 
     var ipc_buf: [ipc.PAM_CONV_BUF_SIZE]u8 = undefined;
+    defer std.crypto.secureZero(u8, &ipc_buf);
 
     for (0..message_count) |i| set_credentials: {
         const message = messages[i].?;
@@ -135,13 +140,13 @@ fn loginConv(
                         .message = msg_text,
                     },
                 };
-                ctx.ipc.writeEvent(&req) catch {
+                ctx.ipc.writeEvent(ipc_writer, &req) catch {
                     status = pam.PAM_CONV_ERR;
                     break :set_credentials;
                 };
-                ctx.ipc.flush() catch {};
+                ipc_writer.flush() catch {};
 
-                const event = ctx.ipc.readEvent(ipc_buf[0..]) catch {
+                const event = ctx.ipc.readEvent(ipc_reader, ipc_buf[0..]) catch {
                     status = pam.PAM_CONV_ERR;
                     break :set_credentials;
                 };
@@ -162,11 +167,11 @@ fn loginConv(
                         .message = msg_text,
                     },
                 };
-                ctx.ipc.writeEvent(&display_msg) catch {
+                ctx.ipc.writeEvent(ipc_writer, &display_msg) catch {
                     status = pam.PAM_CONV_ERR;
                     break :set_credentials;
                 };
-                ctx.ipc.flush() catch {};
+                ipc_writer.flush() catch {};
             },
             else => unreachable,
         }
@@ -227,5 +232,3 @@ fn pamDiagnose(status: c_int) PamError {
         else => unreachable,
     };
 }
-
-

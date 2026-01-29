@@ -49,9 +49,16 @@ pub const SessionEnvKV = struct {
 
 pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
     var event_buf: [ipc_module.GREETER_BUF_SIZE]u8 = undefined;
+    var rbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+    var wbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+
+    var reader = opts.ipc_conn.reader(&rbuf);
+    var writer = opts.ipc_conn.writer(&wbuf);
+    const ipc_reader = &reader.interface;
+    const ipc_writer = &writer.interface;
 
     while (true) {
-        const event = try opts.ipc_conn.readEvent(&event_buf);
+        const event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
         switch (event) {
             .pam_start_auth => |auth| {
                 const user_z = try allocator.dupeZ(u8, auth.user);
@@ -59,6 +66,8 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                 var ctx = pam_module.PamCtx{
                     .user = user_z,
                     .ipc = opts.ipc_conn,
+                    .reader = ipc_reader,
+                    .writer = ipc_writer,
                 };
                 var pam = try Pam.init(opts.service_name, &ctx);
                 defer pam.deinit();
@@ -66,19 +75,19 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
 
                 pam.authenticate() catch {
                     const fail = ipc_module.IpcEvent{ .pam_auth_result = .{ .ok = false } };
-                    opts.ipc_conn.writeEvent(&fail) catch {};
-                    opts.ipc_conn.flush() catch {};
+                    opts.ipc_conn.writeEvent(ipc_writer, &fail) catch {};
+                    ipc_writer.flush() catch {};
                     continue;
                 };
 
                 const ok = ipc_module.IpcEvent{ .pam_auth_result = .{ .ok = true } };
-                try opts.ipc_conn.writeEvent(&ok);
-                try opts.ipc_conn.flush();
+                try opts.ipc_conn.writeEvent(ipc_writer, &ok);
+                try ipc_writer.flush();
 
                 var session_env: SessionEnvKV = .{};
 
                 while (true) {
-                    const session_event = try opts.ipc_conn.readEvent(&event_buf);
+                    const session_event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
                     switch (session_event) {
                         .set_session_env => |env| {
                             const env_key = std.meta.stringToEnum(SessionEnvKey, env.key) orelse break;

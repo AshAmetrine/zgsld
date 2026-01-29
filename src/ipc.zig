@@ -8,7 +8,7 @@ pub const GREETER_BUF_SIZE = 4096;
 // (max_username_len+1)
 pub const PAM_START_BUF_SIZE = 64;
 
-const SOCK_IO_BUF_SIZE = 4096;
+pub const IPC_IO_BUF_SIZE = 4096;
 
 const IpcEventType = enum {
     pam_start_auth,
@@ -66,16 +66,9 @@ pub const IpcEvent = union(IpcEventType) {
 
 pub const Ipc = struct {
     file: std.fs.File,
-    w_buf: [SOCK_IO_BUF_SIZE]u8 = undefined,
-    r_buf: [SOCK_IO_BUF_SIZE]u8 = undefined,
-    writer: std.fs.File.Writer = undefined,
-    reader: std.fs.File.Reader = undefined,
 
     pub fn init(file: std.fs.File) Ipc {
-        var self = Ipc{ .file = file };
-        self.writer = file.writer(&self.w_buf);
-        self.reader = file.reader(&self.r_buf);
-        return self;
+        return Ipc{ .file = file };
     }
 
     pub fn initFromFd(fd: std.posix.fd_t) Ipc {
@@ -86,10 +79,17 @@ pub const Ipc = struct {
         self.file.close();
     }
 
-    fn readHeader(self: *Ipc) !struct { tag: IpcEventType, payload_len: usize } {
-        const reader = &self.reader.interface;
-        const tag_num = try reader.takeInt(u8, .little);
-        const payload_len_u32 = try reader.takeInt(u32, .little);
+    pub fn reader(self: *Ipc, buffer: []u8) std.fs.File.Reader {
+        return self.file.reader(buffer);
+    }
+
+    pub fn writer(self: *Ipc, buffer: []u8) std.fs.File.Writer {
+        return self.file.writer(buffer);
+    }
+
+    fn readHeader(io_reader: *std.Io.Reader) !struct { tag: IpcEventType, payload_len: usize } {
+        const tag_num = try io_reader.takeInt(u8, .little);
+        const payload_len_u32 = try io_reader.takeInt(u32, .little);
         const tag: IpcEventType = @enumFromInt(tag_num);
         return .{
             .tag = tag,
@@ -97,14 +97,13 @@ pub const Ipc = struct {
         };
     }
 
-    fn writeHeader(self: *Ipc, tag: IpcEventType, payload_len: u32) !void {
-        const writer = &self.writer.interface;
-        try writer.writeInt(u8, @intFromEnum(tag), .little);
-        try writer.writeInt(u32, payload_len, .little);
+    fn writeHeader(io_writer: *std.Io.Writer, tag: IpcEventType, payload_len: u32) !void {
+        try io_writer.writeInt(u8, @intFromEnum(tag), .little);
+        try io_writer.writeInt(u32, payload_len, .little);
     }
 
-    pub fn readEvent(self: *Ipc, event_buf: []u8) !IpcEvent {
-        const header = try self.readHeader();
+    pub fn readEvent(_: *Ipc, io_reader: *std.Io.Reader, event_buf: []u8) !IpcEvent {
+        const header = try readHeader(io_reader);
         const payload_len = header.payload_len;
 
         if (payload_len + 1 > event_buf.len) {
@@ -112,8 +111,7 @@ pub const Ipc = struct {
         }
 
         const payload = event_buf[0..payload_len];
-        const reader = &self.reader.interface;
-        try reader.readSliceAll(payload);
+        try io_reader.readSliceAll(payload);
         event_buf[payload_len] = 0;
 
         return switch (header.tag) {
@@ -175,39 +173,38 @@ pub const Ipc = struct {
         };
     }
 
-    pub fn writeEvent(self: *Ipc, event: *const IpcEvent) !void {
-        const writer = &self.writer.interface;
+    pub fn writeEvent(_: *Ipc, io_writer: *std.Io.Writer, event: *const IpcEvent) !void {
         switch (event.*) {
             .pam_start_auth => |ev| {
                 const user_len: u32 = @intCast(ev.user.len);
-                try self.writeHeader(.pam_start_auth, user_len);
-                try writer.writeAll(ev.user);
+                try writeHeader(io_writer, .pam_start_auth, user_len);
+                try io_writer.writeAll(ev.user);
             },
             .pam_message => |info| {
                 const msg_len: u32 = @intCast(info.message.len);
                 const payload_len: u32 = msg_len + 1;
-                try self.writeHeader(.pam_message, payload_len);
+                try writeHeader(io_writer, .pam_message, payload_len);
                 const is_error: u8 = if (info.is_error) 1 else 0;
-                try writer.writeAll(&[_]u8{is_error});
-                try writer.writeAll(info.message);
+                try io_writer.writeAll(&[_]u8{is_error});
+                try io_writer.writeAll(info.message);
             },
             .pam_request => |req| {
                 const msg_len: u32 = @intCast(req.message.len);
                 const payload_len: u32 = msg_len + 1;
-                try self.writeHeader(.pam_request, payload_len);
+                try writeHeader(io_writer, .pam_request, payload_len);
                 const echo_byte: u8 = if (req.echo) 1 else 0;
-                try writer.writeAll(&[_]u8{echo_byte});
-                try writer.writeAll(req.message);
+                try io_writer.writeAll(&[_]u8{echo_byte});
+                try io_writer.writeAll(req.message);
             },
             .pam_response => |resp| {
                 const resp_len: u32 = @intCast(resp.len);
-                try self.writeHeader(.pam_response, resp_len);
-                try writer.writeAll(resp);
+                try writeHeader(io_writer, .pam_response, resp_len);
+                try io_writer.writeAll(resp);
             },
             .pam_auth_result => |result| {
-                try self.writeHeader(.pam_auth_result, 1);
+                try writeHeader(io_writer, .pam_auth_result, 1);
                 const ok_byte: u8 = if (result.ok) 1 else 0;
-                try writer.writeAll(&[_]u8{ok_byte});
+                try io_writer.writeAll(&[_]u8{ok_byte});
             },
             .start_session => |info| {
                 switch (info) {
@@ -216,33 +213,30 @@ pub const Ipc = struct {
                             return error.InvalidPayload;
                         }
                         const payload_len: u32 = @intCast(cmd.argv.len + 1);
-                        try self.writeHeader(.start_session, payload_len);
-                        try writer.writeAll(&[_]u8{@intFromEnum(SessionType.Command)});
-                        try writer.writeAll(cmd.argv);
+                        try writeHeader(io_writer, .start_session, payload_len);
+                        try io_writer.writeAll(&[_]u8{@intFromEnum(SessionType.Command)});
+                        try io_writer.writeAll(cmd.argv);
                     },
                     .X11 => |cmd| {
                         if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
                             return error.InvalidPayload;
                         }
                         const payload_len: u32 = @intCast(cmd.argv.len + 1);
-                        try self.writeHeader(.start_session, payload_len);
-                        try writer.writeAll(&[_]u8{@intFromEnum(SessionType.X11)});
-                        try writer.writeAll(cmd.argv);
+                        try writeHeader(io_writer, .start_session, payload_len);
+                        try io_writer.writeAll(&[_]u8{@intFromEnum(SessionType.X11)});
+                        try io_writer.writeAll(cmd.argv);
                     },
                 }
             },
             .set_session_env => |env| {
                 if (std.mem.indexOfScalar(u8, env.key, '=') != null) return error.InvalidPayload;
                 const payload_len: u32 = @intCast(env.key.len + 1 + env.value.len);
-                try self.writeHeader(.set_session_env, payload_len);
-                try writer.writeAll(env.key);
-                try writer.writeAll("=");
-                try writer.writeAll(env.value);
+                try writeHeader(io_writer, .set_session_env, payload_len);
+                try io_writer.writeAll(env.key);
+                try io_writer.writeAll("=");
+                try io_writer.writeAll(env.value);
             },
         }
     }
 
-    pub fn flush(self: *Ipc) !void {
-        try self.writer.interface.flush();
-    }
 };

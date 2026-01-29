@@ -146,6 +146,20 @@ pub fn forwardIpc(greeter: *GreeterHandle, worker: *WorkerHandle) !void {
     var buf_g: [ipc_module.GREETER_BUF_SIZE]u8 = undefined;
     var buf_w: [ipc_module.GREETER_BUF_SIZE]u8 = undefined;
 
+    var greeter_rbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+    var greeter_wbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+    var greeter_reader = greeter.ipc.reader(&greeter_rbuf);
+    var greeter_writer = greeter.ipc.writer(&greeter_wbuf);
+    const greeter_ipc_reader = &greeter_reader.interface;
+    const greeter_ipc_writer = &greeter_writer.interface;
+
+    var worker_rbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+    var worker_wbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+    var worker_reader = worker.ipc.reader(&worker_rbuf);
+    var worker_writer = worker.ipc.writer(&worker_wbuf);
+    const worker_ipc_reader = &worker_reader.interface;
+    const worker_ipc_writer = &worker_writer.interface;
+
     var fds = [_]std.posix.pollfd{
         .{ .fd = greeter.ipc.file.handle, .events = std.posix.POLL.IN, .revents = 0 },
         .{ .fd = worker.ipc.file.handle, .events = std.posix.POLL.IN, .revents = 0 },
@@ -155,7 +169,7 @@ pub fn forwardIpc(greeter: *GreeterHandle, worker: *WorkerHandle) !void {
         _ = try std.posix.poll(&fds, -1);
 
         if ((fds[0].revents & (std.posix.POLL.IN | std.posix.POLL.HUP)) != 0) {
-            const ev = greeter.ipc.readEvent(&buf_g) catch |err| switch (err) {
+            const ev = greeter.ipc.readEvent(greeter_ipc_reader, &buf_g) catch |err| switch (err) {
                 error.EndOfStream => break,
                 else => return err,
             };
@@ -163,16 +177,18 @@ pub fn forwardIpc(greeter: *GreeterHandle, worker: *WorkerHandle) !void {
                 std.debug.print("Waiting for Greeter to exit...\n",.{});
                 _ = std.posix.waitpid(greeter.pid,0);
             }
-            try worker.ipc.writeEvent(&ev);
-            try worker.ipc.flush();
+            try worker.ipc.writeEvent(worker_ipc_writer, &ev);
+            try worker_ipc_writer.flush();
+
+            std.crypto.secureZero(u8, &buf_g);
         }
         if ((fds[1].revents & (std.posix.POLL.IN | std.posix.POLL.HUP)) != 0) {
-            const ev = worker.ipc.readEvent(&buf_w) catch |err| switch (err) {
+            const ev = worker.ipc.readEvent(worker_ipc_reader, &buf_w) catch |err| switch (err) {
                 error.EndOfStream => break,
                 else => return err,
             };
-            try greeter.ipc.writeEvent(&ev);
-            try greeter.ipc.flush();
+            try greeter.ipc.writeEvent(greeter_ipc_writer, &ev);
+            try greeter_ipc_writer.flush();
         }
 
         if ((fds[0].revents & (std.posix.POLL.ERR)) != 0) 
