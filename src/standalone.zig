@@ -1,10 +1,14 @@
 const std = @import("std");
 const session_manager = @import("session_manager.zig");
+const session_worker = @import("session_worker.zig");
 const ipc = @import("ipc");
 const Greeter = @import("greeter").Greeter;
+const utils = @import("utils.zig");
 
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
+
+    const service_name = Greeter.serviceName();
 
     // Check for fd from ZGSLD_SOCK
     var sock_fd: ?std.posix.fd_t = null;
@@ -13,16 +17,25 @@ pub fn main() !void {
     }
 
     if (sock_fd) |fd| {
-        // We are a greeter
-        std.debug.print("Greeter Started\n",.{});
-
         var ipc_conn = ipc.Ipc.initFromFd(fd);
         defer ipc_conn.deinit();
-        var greeter = try Greeter.init(allocator,&ipc_conn);
-        defer greeter.deinit();
 
-        try greeter.run();
+        if (isSessionWorker()) {
+            std.debug.print("Session Worker Started\n",.{});
+            _ = try session_worker.run(allocator, .{ 
+                .service_name = service_name,
+                .ipc_conn = &ipc_conn,
+            });
+        } else {
+            std.debug.print("Greeter Started\n",.{});
 
+            var greeter = try Greeter.init(allocator,&ipc_conn);
+            defer greeter.deinit();
+
+            try greeter.run();
+
+            std.debug.print("Greeter Exiting...\n",.{});
+        }
         return;
     }
 
@@ -32,24 +45,27 @@ pub fn main() !void {
 
     std.debug.print("Session Manager Started\n",.{});
 
-    const self_exe_path_z = try selfExePathAllocZ(allocator);
+    const self_exe_path_z = try utils.selfExePathAllocZ(allocator);
     defer allocator.free(self_exe_path_z);
 
     std.debug.print("Greeter Path: {s}\n",.{self_exe_path_z});
 
-    const service_name = Greeter.serviceName();
     const greeter_user = "greeter";
 
     std.debug.print("Greeter User: {s}\nPam Service Name: {s}\n",.{greeter_user,service_name});
 
-    try session_manager.run(allocator, .{
+    try session_manager.run(.{ 
+        .self_exe_path = self_exe_path_z,
         .greeter_path = self_exe_path_z,
         .greeter_user = greeter_user,
         .service_name = service_name,
     });
 }
 
-fn selfExePathAllocZ(allocator: std.mem.Allocator) ![:0]u8 {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    return allocator.dupeZ(u8, try std.fs.selfExePath(&buf));
+fn isSessionWorker() bool {
+    var args = std.process.args();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, "--session-worker", arg)) return true; 
+    }
+    return false;
 }
