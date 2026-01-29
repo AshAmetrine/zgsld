@@ -58,7 +58,6 @@ pub fn main() !void {
         .self_exe_path = self_exe_path_z,
         .greeter_path = self_exe_path_z,
         .greeter_user = greeter_user,
-        .service_name = service_name,
     });
 }
 
