@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const native = builtin.target.cpu.arch.endian();
 
 // buffer size to read greeter responses in pam conv
 pub const PAM_CONV_BUF_SIZE = 4096;
@@ -16,6 +18,7 @@ const IpcEventType = enum {
     pam_request,
     pam_response,
     pam_auth_result,
+    pam_cancel,
     start_session,
     set_session_env,
 };
@@ -60,6 +63,7 @@ pub const IpcEvent = union(IpcEventType) {
     pam_request: PamConvRequest,
     pam_response: PamConvResponse,
     pam_auth_result: PamAuthResult,
+    pam_cancel: void,
     start_session: SessionInfo,
     set_session_env: SessionEnvVar,
 };
@@ -88,8 +92,8 @@ pub const Ipc = struct {
     }
 
     fn readHeader(io_reader: *std.Io.Reader) !struct { tag: IpcEventType, payload_len: usize } {
-        const tag_num = try io_reader.takeInt(u8, .little);
-        const payload_len_u32 = try io_reader.takeInt(u32, .little);
+        const tag_num = try io_reader.takeInt(u8, native);
+        const payload_len_u32 = try io_reader.takeInt(u32, native);
         const tag: IpcEventType = @enumFromInt(tag_num);
         return .{
             .tag = tag,
@@ -98,12 +102,13 @@ pub const Ipc = struct {
     }
 
     fn writeHeader(io_writer: *std.Io.Writer, tag: IpcEventType, payload_len: u32) !void {
-        try io_writer.writeInt(u8, @intFromEnum(tag), .little);
-        try io_writer.writeInt(u32, payload_len, .little);
+        try io_writer.writeInt(u8, @intFromEnum(tag), native);
+        try io_writer.writeInt(u32, payload_len, native);
     }
 
     pub fn readEvent(_: *Ipc, io_reader: *std.Io.Reader, event_buf: []u8) !IpcEvent {
         const header = try readHeader(io_reader);
+
         const payload_len = header.payload_len;
 
         if (payload_len + 1 > event_buf.len) {
@@ -120,6 +125,7 @@ pub const Ipc = struct {
                     .user = event_buf[0..payload_len :0],
                 },
             },
+            .pam_cancel => IpcEvent.pam_cancel,
             .pam_message => blk: {
                 if (payload_len < 1) return error.InvalidPayload;
                 const is_error = event_buf[0] != 0;
@@ -180,6 +186,9 @@ pub const Ipc = struct {
                 try writeHeader(io_writer, .pam_start_auth, user_len);
                 try io_writer.writeAll(ev.user);
             },
+            .pam_cancel => {
+                try writeHeader(io_writer,.pam_cancel,0);
+            },
             .pam_message => |info| {
                 const msg_len: u32 = @intCast(info.message.len);
                 const payload_len: u32 = msg_len + 1;
@@ -207,26 +216,17 @@ pub const Ipc = struct {
                 try io_writer.writeAll(&[_]u8{ok_byte});
             },
             .start_session => |info| {
-                switch (info) {
-                    .Command => |cmd| {
-                        if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
-                            return error.InvalidPayload;
-                        }
-                        const payload_len: u32 = @intCast(cmd.argv.len + 1);
-                        try writeHeader(io_writer, .start_session, payload_len);
-                        try io_writer.writeAll(&[_]u8{@intFromEnum(SessionType.Command)});
-                        try io_writer.writeAll(cmd.argv);
-                    },
-                    .X11 => |cmd| {
-                        if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
-                            return error.InvalidPayload;
-                        }
-                        const payload_len: u32 = @intCast(cmd.argv.len + 1);
-                        try writeHeader(io_writer, .start_session, payload_len);
-                        try io_writer.writeAll(&[_]u8{@intFromEnum(SessionType.X11)});
-                        try io_writer.writeAll(cmd.argv);
-                    },
-                }
+                const cmd = switch(info) {
+                    .Command => |cmd| cmd,
+                    .X11 => |cmd| cmd,
+                };
+                    if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
+                        return error.InvalidPayload;
+                    }
+                    const payload_len: u32 = @intCast(cmd.argv.len + 1);
+                    try writeHeader(io_writer, .start_session, payload_len);
+                    try io_writer.writeInt(u8, @intFromEnum(info), native);
+                    try io_writer.writeAll(cmd.argv);
             },
             .set_session_env => |env| {
                 if (std.mem.indexOfScalar(u8, env.key, '=') != null) return error.InvalidPayload;

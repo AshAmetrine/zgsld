@@ -56,7 +56,7 @@ pub fn main() !void {
 
     try session_manager.run(.{ 
         .self_exe_path = self_exe_path_z,
-        .greeter_path = self_exe_path_z,
+        .greeter_argv = &[_]?[*:0]const u8{ self_exe_path_z, null },
         .greeter_user = greeter_user,
     });
 }

@@ -5,6 +5,7 @@ pub const pam = @cImport({
 });
 
 pub const PamCtx = struct {
+    cancelled: bool,
     user: [:0]const u8,
     ipc: *ipc.Ipc,
     reader: *std.Io.Reader,
@@ -110,6 +111,9 @@ fn loginConv(
     resp: ?*?[*]pam.pam_response,
     appdata_ptr: ?*anyopaque,
 ) callconv(.c) c_int {
+    const ctx: *PamCtx = @ptrCast(@alignCast(appdata_ptr));
+    if (ctx.cancelled) return pam.PAM_ABORT;
+
     const message_count: u32 = @intCast(num_msg);
     const messages = msg.?;
 
@@ -122,7 +126,6 @@ fn loginConv(
 
     var status: c_int = pam.PAM_SUCCESS;
 
-    const ctx: *PamCtx = @ptrCast(@alignCast(appdata_ptr));
     const ipc_reader = ctx.reader;
     const ipc_writer = ctx.writer;
 
@@ -156,6 +159,11 @@ fn loginConv(
                             status = pam.PAM_BUF_ERR;
                             break :set_credentials;
                         };
+                    },
+                    .pam_cancel => {
+                        ctx.cancelled = true;
+                        status = pam.PAM_ABORT;
+                        break :set_credentials;
                     },
                     else => unreachable,
                 }

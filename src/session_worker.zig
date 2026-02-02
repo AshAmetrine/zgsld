@@ -58,12 +58,14 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
     const ipc_writer = &writer.interface;
 
     while (true) {
+        std.debug.print("Worker: Waiting for event\n",.{});
         const event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
         switch (event) {
             .pam_start_auth => |auth| {
                 const user_z = try allocator.dupeZ(u8, auth.user);
                 defer allocator.free(user_z);
                 var ctx = pam_module.PamCtx{
+                    .cancelled = false,
                     .user = user_z,
                     .ipc = opts.ipc_conn,
                     .reader = ipc_reader,
@@ -74,6 +76,11 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                 try pam.setItem(pam_module.pam.PAM_USER, user_z);
 
                 pam.authenticate() catch {
+                    if (ctx.cancelled) {
+                        std.debug.print("Worker: Pam Cancelled\n",.{});
+                        continue;
+                    }
+
                     const fail = ipc_module.IpcEvent{ .pam_auth_result = .{ .ok = false } };
                     opts.ipc_conn.writeEvent(ipc_writer, &fail) catch {};
                     ipc_writer.flush() catch {};
@@ -117,7 +124,6 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                         else => unreachable,
                     }
                 }
-
                 break;
             },
             else => unreachable,

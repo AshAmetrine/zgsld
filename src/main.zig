@@ -6,6 +6,52 @@ const session_worker = @import("session_worker.zig");
 const ipc = @import("ipc");
 const utils = @import("utils.zig");
 
+const GreeterCommand = struct {
+    path: [:0]const u8,
+    argv: []const [:0]const u8,
+    argv_ptrs: []?[*:0]const u8,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *GreeterCommand) void {
+        for (self.argv) |arg| self.allocator.free(arg);
+        self.allocator.free(self.argv);
+        self.allocator.free(self.argv_ptrs);
+        self.* = undefined;
+    }
+};
+
+fn buildGreeterCommand(allocator: std.mem.Allocator, res: anytype) !GreeterCommand {
+    const greeter_cmd = res.args.@"greeter-cmd" orelse return error.MissingGreeterCommand;
+    const greeter_args = res.positionals[0];
+
+    const argc = 1 + greeter_args.len;
+    var argv = try allocator.alloc([:0]const u8, argc);
+    var filled: usize = 0;
+    errdefer {
+        for (argv[0..filled]) |arg| allocator.free(arg);
+        allocator.free(argv);
+    }
+
+    argv[0] = try allocator.dupeZ(u8, greeter_cmd);
+    filled = 1;
+    for (greeter_args, 0..) |arg, i| {
+        argv[i + 1] = try allocator.dupeZ(u8, arg);
+        filled += 1;
+    }
+
+    var argv_ptrs = try allocator.alloc(?[*:0]const u8, argv.len + 1);
+    errdefer allocator.free(argv_ptrs);
+    for (argv, 0..) |arg, i| argv_ptrs[i] = arg.ptr;
+    argv_ptrs[argv.len] = null;
+
+    return GreeterCommand{
+        .path = argv[0],
+        .argv = argv,
+        .argv_ptrs = argv_ptrs,
+        .allocator = allocator,
+    };
+}
+
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
@@ -24,8 +70,9 @@ pub fn main() !void {
     const paramStr =
         \\-h, --help                Shows all commands.
         \\-v, --version             Shows the version of zgsld.
-        \\--greeter-path <str>      Sets the greeter path
         \\--vt <u8>                 Sets the VT number
+        \\--greeter-cmd <str>       Sets the greeter command
+        \\<str>...                  Greeter args (use `--` before these)
     ;
 
     const params = comptime clap.parseParamsComptime(paramStr);
@@ -53,19 +100,16 @@ pub fn main() !void {
         std.process.exit(0);
     }
 
-    const greeter_path = if (res.args.@"greeter-path") |path| blk: {
-        break :blk try allocator.dupeZ(u8, path);
-    } else {
-        return error.MissingGreeterPath;
-    };
-    defer allocator.free(greeter_path);
+    var greeter_cmd = try buildGreeterCommand(allocator, res);
+    defer greeter_cmd.deinit();
 
     const self_exe_path_z = try utils.selfExePathAllocZ(allocator);
     defer allocator.free(self_exe_path_z);
 
     try session_manager.run(.{
-        .greeter_path = greeter_path,
+        .greeter_argv = greeter_cmd.argv_ptrs,
         .greeter_user = build_options.greeter_user,
         .self_exe_path = self_exe_path_z,
+        .vt = res.args.vt,
     });
 }
