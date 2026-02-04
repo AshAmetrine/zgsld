@@ -5,6 +5,29 @@ const ipc = @import("ipc");
 const Greeter = @import("greeter").Greeter;
 const utils = @import("utils.zig");
 
+const GreeterArgv = struct {
+    argv_ptrs: []?[*:0]const u8,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *GreeterArgv) void {
+        self.allocator.free(self.argv_ptrs);
+        self.* = undefined;
+    }
+};
+
+fn buildGreeterArgvFromProcess(allocator: std.mem.Allocator) !GreeterArgv {
+    const argv = std.os.argv;
+    var argv_ptrs = try allocator.alloc(?[*:0]const u8, argv.len + 1);
+    errdefer allocator.free(argv_ptrs);
+    for (argv, 0..) |arg, i| argv_ptrs[i] = arg;
+    argv_ptrs[argv.len] = null;
+
+    return .{
+        .argv_ptrs = argv_ptrs,
+        .allocator = allocator,
+    };
+}
+
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
@@ -54,9 +77,12 @@ pub fn main() !void {
 
     std.debug.print("Greeter User: {s}\nPam Service Name: {s}\n",.{greeter_user,service_name});
 
+    var greeter_argv = try buildGreeterArgvFromProcess(allocator);
+    defer greeter_argv.deinit();
+
     try session_manager.run(.{ 
         .self_exe_path = self_exe_path_z,
-        .greeter_argv = &[_]?[*:0]const u8{ self_exe_path_z, null },
+        .greeter_argv = greeter_argv.argv_ptrs,
         .greeter_user = greeter_user,
     });
 }
