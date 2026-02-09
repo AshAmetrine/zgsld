@@ -60,8 +60,9 @@ pub fn main() !void {
         var ipc_conn = ipc.Ipc.initFromFd(sock_fd);
         defer ipc_conn.deinit();
 
+        const service_name = std.posix.getenv("ZGSLD_SERVICE_NAME") orelse build_options.service_name;
         _ = try session_worker.run(allocator, .{ 
-            .service_name = build_options.service_name, 
+            .service_name = service_name,
             .ipc_conn = &ipc_conn, 
         });
         return;
@@ -109,6 +110,7 @@ pub fn main() !void {
     try session_manager.run(.{
         .greeter_argv = greeter_cmd.argv_ptrs,
         .greeter_user = build_options.greeter_user,
+        .service_name = build_options.service_name,
         .self_exe_path = self_exe_path_z,
         .vt = res.args.vt,
     });

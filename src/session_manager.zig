@@ -22,6 +22,7 @@ pub const SessionManagerRunOpts = struct {
     self_exe_path: [:0]const u8,
     greeter_argv: []const ?[*:0]const u8,
     greeter_user: []const u8,
+    service_name: []const u8,
     vt: ?u8 = null,
 };
 
@@ -35,7 +36,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
     while (true) {
         std.debug.print("Spawning Worker...\n",.{});
-        var worker = try spawnWorker(opts.self_exe_path);
+        var worker = try spawnWorker(opts.self_exe_path, opts.service_name);
         defer worker.ipc.deinit();
 
         std.debug.print("Spawning Greeter...\n",.{});
@@ -66,7 +67,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
     }
 }
 
-pub fn spawnWorker(worker_path: [:0]const u8) !WorkerHandle {
+pub fn spawnWorker(worker_path: [:0]const u8, service_name: []const u8) !WorkerHandle {
     var fds: [2]std.posix.fd_t = undefined;
     _ = std.c.socketpair(
         std.c.AF.UNIX,
@@ -81,8 +82,11 @@ pub fn spawnWorker(worker_path: [:0]const u8) !WorkerHandle {
 
         var fd_buf: [27]u8 = undefined;
         const zgsld_sock = try std.fmt.bufPrintZ(&fd_buf, "ZGSLD_SOCK={d}", .{fds[1]});
+        var service_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const zgsld_service = try std.fmt.bufPrintZ(&service_buf, "ZGSLD_SERVICE_NAME={s}", .{service_name});
         const worker_environ: [*:null]const ?[*:0]const u8 = &.{
             zgsld_sock,
+            zgsld_service,
             null,
         };
 
@@ -128,8 +132,10 @@ pub fn spawnGreeter(greeter_argv: []const ?[*:0]const u8, greeter_user: []const 
     );
 
     var runtime_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/run/user/{d}", .{pw.uid});
-    try ensureRuntimeDir(runtime_dir, pw.uid, pw.gid);
+    var runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/run/user/{d}", .{pw.uid});
+    ensureRuntimeDir(runtime_dir, pw.uid, pw.gid) catch {
+        runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/tmp", .{});
+    };
 
     const pid = try std.posix.fork();
     if (pid == 0) {
