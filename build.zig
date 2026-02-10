@@ -7,26 +7,33 @@ pub fn build(b: *std.Build) !void {
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const standalone_opt = b.option(bool, "standalone", "Build standalone greeter + session manager") orelse false;
+    if (b.pkg_hash.len == 0 and standalone_opt) {
+        std.log.warn("zgsld: ignoring -Dstandalone=true for top-level builds (library-only option)", .{});
+    }
+    const standalone = if (b.pkg_hash.len == 0) false else standalone_opt;
 
     const service_name = b.option([]const u8, "service-name","Set PAM service name") orelse "login";
     const greeter_user = b.option([]const u8, "greeter-user","User that runs the greeter") orelse "greeter";
    
     const build_options = b.addOptions();
-    build_options.addOption(bool, "standalone", false);
+    build_options.addOption(bool, "standalone", standalone);
     build_options.addOption([]const u8, "version", version_str);
     build_options.addOption([]const u8, "service_name", service_name);
     build_options.addOption([]const u8, "greeter_user", greeter_user);
-    build_options.addOption(u8, "vt", 2);
+    build_options.addOption(?u8, "vt", null);
     const build_options_mod = build_options.createModule();
 
-    const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
 
-    const ipc_mod = b.addModule("zgipc", .{
+    const ipc_mod = b.addModule("zgsld", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
     ipc_mod.addImport("build_options", build_options_mod);
+    ipc_mod.linkSystemLibrary("pam",.{});
+
+    const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
 
     const exe = b.addExecutable(.{
         .name = "zgsld",
@@ -35,9 +42,8 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "clap", .module = clap.module("clap") },
                 .{ .name = "build_options", .module = build_options_mod },
-                .{ .name = "ipc", .module = ipc_mod },
+                .{ .name = "clap", .module = clap.module("clap") },
             },
             .link_libc = true,
         }),
@@ -65,9 +71,8 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "clap", .module = clap.module("clap") },
                 .{ .name = "build_options", .module = build_options_mod },
-                .{ .name = "ipc", .module = ipc_mod },
+                .{ .name = "clap", .module = clap.module("clap") },
             },
         }),
     });
@@ -76,60 +81,6 @@ pub fn build(b: *std.Build) !void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
-}
-
-pub const StandaloneOpts = struct {
-    name: []const u8,
-    root_module: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-};
-
-pub fn makeStandalone(b: *std.Build, opts: StandaloneOpts) *std.Build.Step.Compile {
-    const zgsld = b.dependencyFromBuildZig(@This(),.{});
-    const target = opts.target;
-    const optimize = opts.optimize;
-    
-    const build_options = b.addOptions();
-    const sem_ver = std.SemanticVersion.parse(build_zon.version) catch unreachable;
-    const version_str = getVersionStr(b, "zgsld", sem_ver) catch "0.0.0";
-    const service_name = b.option([]const u8, "service-name", "Set PAM service name") orelse "login";
-    const greeter_user = b.option([]const u8, "greeter-user", "User that runs the greeter") orelse "greeter";
-    const vt = b.option(u8, "vt", "Set the VT number") orelse 2;
-
-    build_options.addOption(bool, "standalone", true);
-    build_options.addOption([]const u8, "version", version_str);
-    build_options.addOption([]const u8, "service_name", service_name);
-    build_options.addOption([]const u8, "greeter_user", greeter_user);
-    build_options.addOption(u8, "vt", vt);
-    const build_options_mod = build_options.createModule();
-    
-    const ipc_mod = b.addModule("zgipc", .{
-        .root_source_file = zgsld.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    ipc_mod.addImport("build_options", build_options_mod);
-
-    const exe = b.addExecutable(.{
-        .name = opts.name,
-        .root_module = b.createModule(.{
-                .root_source_file = zgsld.path("src/standalone.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                .{ .name = "build_options", .module = build_options_mod },
-                .{ .name = "ipc", .module = ipc_mod },
-            },
-            .link_libc = true,
-        }),
-    });
-    exe.linkSystemLibrary("pam");
-        
-    opts.root_module.addImport("zgipc",ipc_mod);
-    exe.root_module.addImport("greeter", opts.root_module);
-
-    return exe;
 }
 
 fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) ![]const u8 {

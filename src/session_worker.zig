@@ -1,9 +1,9 @@
 const std = @import("std");
 const pam_module = @import("auth/pam.zig");
 const Pam = pam_module.Pam;
-const ipc_module = @import("ipc");
+const ipc_module = @import("ipc.zig");
 const builtin = @import("builtin");
-
+const log = std.log.scoped(.zgsld_worker);
 const c = @cImport({
     if (builtin.os.tag == .linux) {
         @cInclude("grp.h");
@@ -58,7 +58,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
     const ipc_writer = &writer.interface;
 
     while (true) {
-        std.debug.print("Worker: Waiting for event\n",.{});
+        log.debug("Waiting for event", .{});
         const event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
         switch (event) {
             .pam_start_auth => |auth| {
@@ -77,7 +77,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
 
                 pam.authenticate() catch {
                     if (ctx.cancelled) {
-                        std.debug.print("Worker: Pam Cancelled\n",.{});
+                        log.debug("Pam cancelled", .{});
                         continue;
                     }
 
@@ -117,7 +117,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                                 break :blk try startSession(allocator, user_z, info, &pam, session_env, opts.vt);
                             };
 
-                            std.debug.print("Waiting for session to end...\n",.{});
+                            log.debug("Waiting for session to end...", .{});
                             const status = std.posix.waitpid(pid, 0);
                             std.process.exit(std.c.W.EXITSTATUS(status.status));
                         },

@@ -1,86 +1,69 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const clap = @import("clap");
+const ipc = @import("ipc.zig");
 const session_manager = @import("session_manager.zig");
 const session_worker = @import("session_worker.zig");
-const ipc = @import("ipc");
-const utils = @import("utils.zig");
 
-const GreeterCommand = struct {
-    path: [:0]const u8,
-    argv: []const [:0]const u8,
-    argv_ptrs: []?[*:0]const u8,
-    allocator: std.mem.Allocator,
+const clap = @import("clap");
 
-    fn deinit(self: *GreeterCommand) void {
-        for (self.argv) |arg| self.allocator.free(arg);
-        self.allocator.free(self.argv);
-        self.allocator.free(self.argv_ptrs);
+const log = std.log.scoped(.zgsld);
+
+const clap_param_str =
+    \\-h, --help                Shows all commands.
+    \\-v, --version             Shows the version of zgsld.
+    \\-c, --config <str>        Path to ZGSLD config
+    \\--vt <u8>                 Sets the VT number
+    \\--greeter-cmd <str>       Sets the greeter command
+    \\<str>...                  Greeter Command with args (use `--` before these)
+;
+
+const GreeterArgv = struct {
+    argv_ptrs: [:null]const ?[*:0]const u8,
+    arena: std.heap.ArenaAllocator,
+
+    fn deinit(self: *GreeterArgv) void {
+        self.arena.deinit();
         self.* = undefined;
     }
 };
 
-fn buildGreeterCommand(allocator: std.mem.Allocator, res: anytype) !GreeterCommand {
-    const greeter_cmd = res.args.@"greeter-cmd" orelse return error.MissingGreeterCommand;
-    const greeter_args = res.positionals[0];
-
-    const argc = 1 + greeter_args.len;
-    var argv = try allocator.alloc([:0]const u8, argc);
-    var filled: usize = 0;
-    errdefer {
-        for (argv[0..filled]) |arg| allocator.free(arg);
-        allocator.free(argv);
-    }
-
-    argv[0] = try allocator.dupeZ(u8, greeter_cmd);
-    filled = 1;
-    for (greeter_args, 0..) |arg, i| {
-        argv[i + 1] = try allocator.dupeZ(u8, arg);
-        filled += 1;
-    }
-
-    var argv_ptrs = try allocator.alloc(?[*:0]const u8, argv.len + 1);
-    errdefer allocator.free(argv_ptrs);
-    for (argv, 0..) |arg, i| argv_ptrs[i] = arg.ptr;
-    argv_ptrs[argv.len] = null;
-
-    return GreeterCommand{
-        .path = argv[0],
-        .argv = argv,
-        .argv_ptrs = argv_ptrs,
-        .allocator = allocator,
-    };
-}
-
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
+    const is_worker = isSessionWorker();
 
+    var sock_fd: ?std.posix.fd_t = null;
     if (std.posix.getenv("ZGSLD_SOCK")) |sock| {
-        const sock_fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
-        var ipc_conn = ipc.Ipc.initFromFd(sock_fd);
+        sock_fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
+    }
+
+    if (sock_fd) |fd| {
+        if (!is_worker) {
+            log.err("ZGSLD_SOCK set without --session-worker", .{});
+            return error.UnexpectedSessionWorker;
+        }
+
+        var ipc_conn = ipc.Ipc.initFromFd(fd);
         defer ipc_conn.deinit();
 
         const service_name = std.posix.getenv("ZGSLD_SERVICE_NAME") orelse build_options.service_name;
-        _ = try session_worker.run(allocator, .{ 
+        log.info("Session Worker Started", .{});
+        _ = try session_worker.run(allocator, .{
             .service_name = service_name,
-            .ipc_conn = &ipc_conn, 
+            .ipc_conn = &ipc_conn,
         });
         return;
     }
 
-    const paramStr =
-        \\-h, --help                Shows all commands.
-        \\-v, --version             Shows the version of zgsld.
-        \\--vt <u8>                 Sets the VT number
-        \\--greeter-cmd <str>       Sets the greeter command
-        \\<str>...                  Greeter args (use `--` before these)
-    ;
+    if (is_worker) {
+        log.err("Session worker requires ZGSLD_SOCK", .{});
+        return error.MissingZgsldSock;
+    }
 
-    const params = comptime clap.parseParamsComptime(paramStr);
-
+    const params = comptime clap.parseParamsComptime(clap_param_str);
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
-        .diagnostic = &diag, .allocator = allocator,
+        .diagnostic = &diag,
+        .allocator = allocator,
     }) catch |err| {
         diag.reportToFile(.stderr(), err) catch {};
         return err;
@@ -101,17 +84,60 @@ pub fn main() !void {
         std.process.exit(0);
     }
 
-    var greeter_cmd = try buildGreeterCommand(allocator, res);
-    defer greeter_cmd.deinit();
+    if (res.args.config) |config_path| {
+        // TODO: check config_path
+        _ = config_path;
+    } else {
+        // TODO: check default config path
+    }
 
-    const self_exe_path_z = try utils.selfExePathAllocZ(allocator);
-    defer allocator.free(self_exe_path_z);
+    const greeter_path = res.args.@"greeter-cmd".?;
+    const greeter_args = res.positionals[0];
 
+    var greeter_argv = try buildGreeterArgv(allocator, greeter_path, greeter_args);
+    defer greeter_argv.deinit();
+
+    const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
     try session_manager.run(.{
-        .greeter_argv = greeter_cmd.argv_ptrs,
+        .self_exe_path = self_exe_path_z,
+        .greeter_argv = greeter_argv.argv_ptrs,
         .greeter_user = build_options.greeter_user,
         .service_name = build_options.service_name,
-        .self_exe_path = self_exe_path_z,
         .vt = res.args.vt,
     });
+}
+
+fn isSessionWorker() bool {
+    var args = std.process.args();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, "--session-worker", arg)) return true;
+    }
+    return false;
+}
+
+fn buildGreeterArgv(
+    allocator: std.mem.Allocator,
+    command: []const u8,
+    args: []const []const u8,
+) !GreeterArgv {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    const argv_len = args.len + 1;
+    var argv_ptrs = try arena_allocator.alloc(?[*:0]const u8, argv_len + 1);
+    argv_ptrs[argv_len] = null;
+
+    const command_z = try arena_allocator.dupeZ(u8, command);
+    argv_ptrs[0] = command_z;
+
+    for (args, 1..) |arg, i| {
+        const arg_z = try arena_allocator.dupeZ(u8, arg);
+        argv_ptrs[i] = arg_z;
+    }
+
+    return .{
+        .argv_ptrs = argv_ptrs[0..argv_len :null],
+        .arena = arena,
+    };
 }

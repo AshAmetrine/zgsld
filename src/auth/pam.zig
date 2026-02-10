@@ -1,5 +1,5 @@
 const std = @import("std");
-const ipc = @import("ipc");
+const ipc = @import("../ipc.zig");
 pub const pam = @cImport({
     @cInclude("security/pam_appl.h");
 });
