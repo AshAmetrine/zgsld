@@ -101,14 +101,24 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
 
                             errdefer session_env.deinit(allocator);
 
-                            const value = try std.fmt.allocPrintSentinel(allocator, "{s}={s}", .{env.key, env.value}, 0);
+                            const slot = switch (env_key) {
+                                .PATH => &session_env.path,
+                                .XDG_SESSION_DESKTOP => &session_env.xdg_session_desktop,
+                                .XDG_CURRENT_DESKTOP => &session_env.xdg_current_desktop,
+                                .XDG_SESSION_TYPE => &session_env.xdg_session_type,
+                            };
+                            if (slot.* != null) break;
 
-                            switch (env_key) {
-                                .PATH => session_env.path = value,
-                                .XDG_SESSION_DESKTOP => session_env.xdg_session_desktop = value,
-                                .XDG_CURRENT_DESKTOP => session_env.xdg_current_desktop = value,
-                                .XDG_SESSION_TYPE => session_env.xdg_session_type = value,
-                            }
+                            const value = switch (env_key) {
+                                .PATH => try allocator.dupeZ(u8, env.value),
+                                else => try std.fmt.allocPrintSentinel(
+                                    allocator,
+                                    "{s}={s}",
+                                    .{ env.key, env.value },
+                                    0,
+                                ),
+                            };
+                            slot.* = value;
                         },
                         .start_session => |info| {
                             // We should wait for the greeter to end in the session manager, then forward this event.

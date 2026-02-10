@@ -3,6 +3,7 @@ const build_options = @import("build_options");
 const ipc = @import("ipc.zig");
 const session_manager = @import("session_manager.zig");
 const session_worker = @import("session_worker.zig");
+const utils = @import("utils.zig");
 
 const clap = @import("clap");
 
@@ -29,7 +30,7 @@ const GreeterArgv = struct {
 
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
-    const is_worker = isSessionWorker();
+    const is_worker = utils.isSessionWorker();
 
     var sock_fd: ?std.posix.fd_t = null;
     if (std.posix.getenv("ZGSLD_SOCK")) |sock| {
@@ -105,14 +106,6 @@ pub fn main() !void {
         .service_name = build_options.service_name,
         .vt = res.args.vt,
     });
-}
-
-fn isSessionWorker() bool {
-    var args = std.process.args();
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, "--session-worker", arg)) return true;
-    }
-    return false;
 }
 
 fn buildGreeterArgv(

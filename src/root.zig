@@ -2,6 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const session_manager_mod = if (build_options.standalone) @import("session_manager.zig") else struct {};
 const session_worker_mod = if (build_options.standalone) @import("session_worker.zig") else struct {};
+const utils = @import("utils.zig");
 
 pub const session_manager = session_manager_mod;
 pub const session_worker = session_worker_mod;
@@ -120,7 +121,7 @@ pub const Zgsld = struct {
     }
 
     fn runWithIpc(self: Zgsld, ipc_conn: *Ipc) !void {
-        if (build_options.standalone and isSessionWorker()) {
+        if (build_options.standalone and utils.isSessionWorker()) {
             const service_name = std.posix.getenv("ZGSLD_SERVICE_NAME") orelse build_options.service_name;
             log.info("Session Worker Started", .{});
             _ = try session_worker_mod.run(self.allocator, .{
@@ -202,11 +203,3 @@ pub const Zgsld = struct {
         }
     }
 };
-
-fn isSessionWorker() bool {
-    var args = std.process.args();
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, "--session-worker", arg)) return true;
-    }
-    return false;
-}

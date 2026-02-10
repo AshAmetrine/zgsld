@@ -73,13 +73,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 }
 
 pub fn spawnWorker(worker_path: [:0]const u8, service_name: []const u8) !WorkerHandle {
-    var fds: [2]std.posix.fd_t = undefined;
-    _ = std.c.socketpair(
-        std.c.AF.UNIX,
-        std.c.SOCK.STREAM,
-        0,
-        &fds,
-    );
+    const fds = try createSocketPair();
 
     const pid = try std.posix.fork();
     if (pid == 0) {
@@ -128,13 +122,7 @@ pub fn spawnGreeter(greeter_argv: [:null]const ?[*:0]const u8, greeter_user: []c
 
     const pw = std.c.getpwnam(greeter_user_z) orelse return error.GreeterUserNotFound;
 
-    var fds: [2]std.posix.fd_t = undefined;
-    _ = std.c.socketpair(
-        std.c.AF.UNIX,
-        std.c.SOCK.STREAM,
-        0,
-        &fds,
-    );
+    const fds = try createSocketPair();
 
     var runtime_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     var runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/run/user/{d}", .{pw.uid});
@@ -309,4 +297,11 @@ pub fn forwardIpc(greeter: *GreeterHandle, worker: *WorkerHandle) !void {
         if ((fds[1].revents & (std.posix.POLL.ERR)) != 0)
             break;
     }
+}
+
+fn createSocketPair() ![2]std.posix.fd_t {
+    var fds: [2]std.posix.fd_t = undefined;
+    const rc = std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
+    if (rc != 0) return std.posix.unexpectedErrno(std.posix.errno(rc));
+    return fds;
 }
