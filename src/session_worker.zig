@@ -107,7 +107,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                                 .XDG_CURRENT_DESKTOP => &session_env.xdg_current_desktop,
                                 .XDG_SESSION_TYPE => &session_env.xdg_session_type,
                             };
-                            if (slot.* != null) break;
+                            if (slot.* != null) continue;
 
                             const value = switch (env_key) {
                                 .PATH => try allocator.dupeZ(u8, env.value),
