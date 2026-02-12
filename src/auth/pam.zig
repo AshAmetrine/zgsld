@@ -16,10 +16,12 @@ pub const Pam = struct {
     handle: ?*pam.pam_handle,
     ctx: *PamCtx,
     status: c_int,
+    allocator: std.mem.Allocator,
+    env_arena: std.heap.ArenaAllocator,
     session_open: bool = false,
     creds_established: bool = false,
 
-    pub fn init(service_name: []const u8, ctx: *PamCtx) !Pam {
+    pub fn init(service_name: []const u8, ctx: *PamCtx, allocator: std.mem.Allocator) !Pam {
         const conv = pam.pam_conv{
             .conv = loginConv,
             .appdata_ptr = @ptrCast(ctx),
@@ -30,7 +32,13 @@ pub const Pam = struct {
         const status = pam.pam_start(service_name.ptr, null, &conv, &handle);
         if (status != pam.PAM_SUCCESS) return pamDiagnose(status);
 
-        return .{ .handle = handle, .ctx = ctx, .status = status };
+        return .{
+            .handle = handle,
+            .ctx = ctx,
+            .status = status,
+            .allocator = allocator,
+            .env_arena = std.heap.ArenaAllocator.init(allocator),
+        };
     }
 
     pub fn deinit(self: *Pam) void {
@@ -38,6 +46,7 @@ pub const Pam = struct {
         if (self.session_open) _ = pam.pam_close_session(self.handle, 0);
         if (self.creds_established) _ = pam.pam_setcred(self.handle, pam.PAM_DELETE_CRED);
         _ = pam.pam_end(self.handle, self.status);
+        self.env_arena.deinit();
         self.handle = null;
     }
 
@@ -71,6 +80,27 @@ pub const Pam = struct {
         if (self.status != pam.PAM_SUCCESS) return pamDiagnose(self.status);
     }
 
+    pub fn putEnvAlloc(self: *Pam, key: []const u8, value: []const u8) !void {
+        if (std.mem.indexOfScalar(u8, key, '=') != null) return error.InvalidPayload;
+        const kv = try std.fmt.allocPrintSentinel(self.env_arena.allocator(), "{s}={s}", .{ key, value }, 0);
+        try self.putEnv(kv);
+    }
+
+    pub fn putEnvList(self: *Pam, env_map: *std.process.EnvMap) !void {
+        const env_list = self.getEnvList();
+        defer freeEnvList(env_list);
+
+        if (env_list) |list| {
+            var i: usize = 0;
+            while (list[i]) |entry| : (i += 1) {
+                const s = std.mem.span(entry);
+                const eq = std.mem.indexOfScalar(u8, s, '=') orelse continue;
+                if (eq == 0) continue;
+                try env_map.put(s[0..eq], s[eq + 1 ..]);
+            }
+        }
+    }
+
     fn getEnvList(self: *Pam) ?[*:null]?[*:0]u8 {
         return pam.pam_getenvlist(self.handle);
     }
@@ -84,22 +114,11 @@ pub const Pam = struct {
         std.c.free(@ptrCast(list));
     }
 
-    pub fn createEnvListMap(self: *Pam, allocator: std.mem.Allocator) !std.process.EnvMap {
-        var env_map = std.process.EnvMap.init(allocator);
+    pub fn createEnvListMap(self: *Pam) !std.process.EnvMap {
+        var env_map = std.process.EnvMap.init(self.allocator);
         errdefer env_map.deinit();
 
-        const env_list = self.getEnvList();
-        defer freeEnvList(env_list);
-
-        if (env_list) |list| {
-            var i: usize = 0;
-            while (list[i]) |entry| : (i += 1) {
-                const s = std.mem.span(entry);
-                const eq = std.mem.indexOfScalar(u8, s, '=') orelse continue;
-                if (eq == 0) continue;
-                try env_map.put(s[0..eq],s[eq+1..]);
-            }
-        }
+        try self.putEnvList(&env_map);
 
         return env_map;
     }
@@ -149,7 +168,7 @@ fn loginConv(
                 };
                 ipc_writer.flush() catch {};
 
-                const event = ctx.ipc.readEvent(ipc_reader, ipc_buf[0..]) catch {
+                const event = ctx.ipc.readEvent(ipc_reader, &ipc_buf) catch {
                     status = pam.PAM_CONV_ERR;
                     break :set_credentials;
                 };

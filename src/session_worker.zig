@@ -31,22 +31,6 @@ const SessionEnvKey = enum {
     XDG_SESSION_TYPE,
 };
 
-// stored: KEY=VALUE
-pub const SessionEnvKV = struct {
-    path: ?[:0]const u8  = null,
-    xdg_session_desktop: ?[:0]const u8 = null,
-    xdg_current_desktop: ?[:0]const u8 = null,
-    xdg_session_type: ?[:0]const u8 = null,
-
-    pub fn deinit(self: *SessionEnvKV, allocator: std.mem.Allocator) void {
-        if (self.path) |v| allocator.free(v);
-        if (self.xdg_session_desktop) |v| allocator.free(v);
-        if (self.xdg_current_desktop) |v| allocator.free(v);
-        if (self.xdg_session_type) |v| allocator.free(v);
-        self.* = .{};
-    }
-};
-
 pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
     var event_buf: [ipc_module.GREETER_BUF_SIZE]u8 = undefined;
     var rbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
@@ -71,7 +55,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                     .reader = ipc_reader,
                     .writer = ipc_writer,
                 };
-                var pam = try Pam.init(opts.service_name, &ctx);
+                var pam = try Pam.init(opts.service_name, &ctx, allocator);
                 defer pam.deinit();
                 try pam.setItem(pam_module.pam.PAM_USER, user_z);
 
@@ -91,40 +75,20 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                 try opts.ipc_conn.writeEvent(ipc_writer, &ok);
                 try ipc_writer.flush();
 
-                var session_env: SessionEnvKV = .{};
+                var session_envmap = std.process.EnvMap.init(allocator);
+                errdefer session_envmap.deinit();
 
                 while (true) {
                     const session_event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
                     switch (session_event) {
                         .set_session_env => |env| {
-                            const env_key = std.meta.stringToEnum(SessionEnvKey, env.key) orelse break;
-
-                            errdefer session_env.deinit(allocator);
-
-                            const slot = switch (env_key) {
-                                .PATH => &session_env.path,
-                                .XDG_SESSION_DESKTOP => &session_env.xdg_session_desktop,
-                                .XDG_CURRENT_DESKTOP => &session_env.xdg_current_desktop,
-                                .XDG_SESSION_TYPE => &session_env.xdg_session_type,
-                            };
-                            if (slot.* != null) continue;
-
-                            const value = switch (env_key) {
-                                .PATH => try allocator.dupeZ(u8, env.value),
-                                else => try std.fmt.allocPrintSentinel(
-                                    allocator,
-                                    "{s}={s}",
-                                    .{ env.key, env.value },
-                                    0,
-                                ),
-                            };
-                            slot.* = value;
+                            if (std.meta.stringToEnum(SessionEnvKey, env.key) == null) break;
+                            try session_envmap.put(env.key, env.value);
                         },
                         .start_session => |info| {
-                            // We should wait for the greeter to end in the session manager, then forward this event.
                             const pid = blk: {
-                                defer session_env.deinit(allocator);
-                                break :blk try startSession(allocator, user_z, info, &pam, session_env, opts.vt);
+                                defer session_envmap.deinit();
+                                break :blk try startSession(allocator, user_z, info, &pam, &session_envmap, opts.vt);
                             };
 
                             log.debug("Waiting for session to end...", .{});
@@ -147,26 +111,27 @@ fn startSession(
     user: [:0]const u8,
     info: ipc_module.SessionInfo,
     pam: *Pam,
-    session_env: SessionEnvKV,
+    session_envmap: *std.process.EnvMap,
     vt: ?u8,
 ) !std.posix.fd_t {
     const pw = std.c.getpwnam(user) orelse return error.UserUnknown;
 
-    if (session_env.xdg_current_desktop) |v| {
-        try pam.putEnv(v);
+    if (session_envmap.get("XDG_CURRENT_DESKTOP")) |v| {
+        try pam.putEnvAlloc("XDG_CURRENT_DESKTOP", v);
     }
-    if (session_env.xdg_session_desktop) |v| {
-        try pam.putEnv(v);
+    if (session_envmap.get("XDG_SESSION_DESKTOP")) |v| {
+        try pam.putEnvAlloc("XDG_SESSION_DESKTOP", v);
     }
-    if (session_env.xdg_session_type) |v| {
-        try pam.putEnv(v);
+    if (session_envmap.get("XDG_SESSION_TYPE")) |v| {
+        try pam.putEnvAlloc("XDG_SESSION_TYPE", v);
     }
 
     if (vt) |vt_num| {
-        var vt_buf: [17]u8 = undefined;
-        const vt_z = try std.fmt.bufPrintZ(&vt_buf, "XDG_VTNR={d}", .{vt_num});
-        try pam.putEnv(vt_z);
+        var vt_buf: [3]u8 = undefined;
+        const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
+        try pam.putEnvAlloc("XDG_VTNR", vt_value);
     }
+
     try pam.putEnv("XDG_SESSION_CLASS=user");
 
     if (std.posix.geteuid() == 0) {
@@ -174,8 +139,9 @@ fn startSession(
         try pam.openSession();
     }
 
-    var session_envmap = try pam.createEnvListMap(allocator);
-    defer session_envmap.deinit();
+    // Add pam env list to the envmap (overwrites)
+    try pam.putEnvList(session_envmap);
+
     if (pw.dir) |home_dir| {
         const s = std.mem.span(home_dir);
         try session_envmap.put("HOME", s);
@@ -189,13 +155,9 @@ fn startSession(
         try session_envmap.put("SHELL", std.mem.span(shell));
     }
 
-    if (session_env.path) |path| {
-        try session_envmap.put("PATH", path);
-    }
-
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), &session_envmap);
+    const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), session_envmap);
  
     const user_info: UserInfo = .{ 
         .user = user,
