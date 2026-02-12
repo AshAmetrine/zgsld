@@ -31,11 +31,12 @@ pub const SessionType = enum(u8) {
 pub const SessionCommand = struct {
     // NUL-separated argv with a trailing NUL.
     argv: []const u8,
+    source_profile: bool = true,
 };
 
-pub const SessionInfo = union(SessionType) {
-    Command: SessionCommand,
-    X11: SessionCommand,
+pub const SessionInfo = struct {
+    session_type: SessionType,
+    command: SessionCommand,
 };
 
 pub const SessionEnvVar = struct {
@@ -155,14 +156,18 @@ pub const Ipc = struct {
                 break :blk IpcEvent{ .pam_auth_result = .{ .ok = ok } };
             },
             .start_session => blk: {
-                if (payload_len < 2) return error.InvalidPayload;
+                if (payload_len < 3) return error.InvalidPayload;
                 const session_type: SessionType = @enumFromInt(event_buf[0]);
-                const argv = event_buf[1..payload_len];
+                const flags = event_buf[1];
+                const argv = event_buf[2..payload_len];
                 if (argv[0] == 0) return error.InvalidPayload;
                 if (argv[argv.len - 1] != 0) return error.InvalidPayload;
-                break :blk switch (session_type) {
-                    .Command => IpcEvent{ .start_session = .{ .Command = .{ .argv = argv } } },
-                    .X11 => IpcEvent{ .start_session = .{ .X11 = .{ .argv = argv } } },
+                const source_profile = (flags & 0x01) != 0;
+                break :blk IpcEvent{
+                    .start_session = .{
+                        .session_type = session_type,
+                        .command = .{ .argv = argv, .source_profile = source_profile },
+                    },
                 };
             },
             .set_session_env => blk: {
@@ -216,17 +221,16 @@ pub const Ipc = struct {
                 try io_writer.writeAll(&[_]u8{ok_byte});
             },
             .start_session => |info| {
-                const cmd = switch(info) {
-                    .Command => |cmd| cmd,
-                    .X11 => |cmd| cmd,
-                };
-                    if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
-                        return error.InvalidPayload;
-                    }
-                    const payload_len: u32 = @intCast(cmd.argv.len + 1);
-                    try writeHeader(io_writer, .start_session, payload_len);
-                    try io_writer.writeInt(u8, @intFromEnum(info), native);
-                    try io_writer.writeAll(cmd.argv);
+                const cmd = info.command;
+                if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
+                    return error.InvalidPayload;
+                }
+                const payload_len: u32 = @intCast(cmd.argv.len + 2);
+                try writeHeader(io_writer, .start_session, payload_len);
+                try io_writer.writeInt(u8, @intFromEnum(info.session_type), native);
+                const flags: u8 = if (cmd.source_profile) 0x01 else 0x00;
+                try io_writer.writeInt(u8, flags, native);
+                try io_writer.writeAll(cmd.argv);
             },
             .set_session_env => |env| {
                 if (std.mem.indexOfScalar(u8, env.key, '=') != null) return error.InvalidPayload;
