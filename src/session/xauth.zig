@@ -103,7 +103,7 @@ fn resolveXauthPath(buf: []u8, home: []const u8) ![]const u8 {
 /// then creates the file with a unique id.
 fn createUniqueXauthFile(buf: []u8, home: []const u8) !XauthDir {
     var base_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const xauth_path = try resolveXauthPath(base_buf[0..], home);
+    const xauth_path = try resolveXauthPath(&base_buf, home);
 
     var attempts: usize = 0;
     while (attempts < 16) : (attempts += 1) {

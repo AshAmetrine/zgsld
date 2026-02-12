@@ -248,7 +248,7 @@ pub fn forwardIpc(greeter: *GreeterHandle, worker: *WorkerHandle) !void {
                         }
                     },
                     .pam_cancel => {
-                        if (phase != .auth_in_progress) {
+                        if (phase != .auth_in_progress and phase != .awaiting_response) {
                             log.debug("Dropping {s} in state {s}", .{ @tagName(ev), @tagName(phase) });
                             forward = false;
                         } else {
