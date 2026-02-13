@@ -116,7 +116,7 @@ pub const Zgsld = struct {
             try self.runStandalone();
         } else {
             log.err("Is the greeter being run by zgsld?", .{});
-            unreachable;
+            return error.MissingZgsldSock;
         }
     }
 
