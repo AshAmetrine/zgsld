@@ -86,6 +86,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                             try session_envmap.put(env.key, env.value);
                         },
                         .start_session => |info| {
+                            log.debug("Starting session...",.{});
                             const pid = blk: {
                                 defer session_envmap.deinit();
                                 break :blk try startSession(allocator, user_z, info, &pam, &session_envmap, opts.vt);
