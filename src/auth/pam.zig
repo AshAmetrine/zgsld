@@ -179,7 +179,7 @@ fn loginConv(
                             break :set_credentials;
                         };
                     },
-                    .pam_cancel => {
+                    .login_cancel => {
                         ctx.cancelled = true;
                         status = pam.PAM_ABORT;
                         break :set_credentials;

@@ -45,6 +45,10 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
         log.debug("Waiting for event", .{});
         const event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
         switch (event) {
+            .login_cancel => {
+                log.debug("Login cancelled before auth start", .{});
+                continue;
+            },
             .pam_start_auth => |auth| {
                 const user_z = try allocator.dupeZ(u8, auth.user);
                 defer allocator.free(user_z);
@@ -61,7 +65,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
 
                 pam.authenticate() catch {
                     if (ctx.cancelled) {
-                        log.debug("Pam cancelled", .{});
+                        log.debug("Pam auth cancelled", .{});
                         continue;
                     }
 
@@ -81,12 +85,17 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                 while (true) {
                     const session_event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
                     switch (session_event) {
+                        .login_cancel => {
+                            log.debug("Login cancelled before session start", .{});
+                            session_envmap.deinit();
+                            break;
+                        },
                         .set_session_env => |env| {
                             if (std.meta.stringToEnum(SessionEnvKey, env.key) == null) break;
                             try session_envmap.put(env.key, env.value);
                         },
                         .start_session => |info| {
-                            log.debug("Starting session...",.{});
+                            log.debug("Starting session...", .{});
                             const pid = blk: {
                                 defer session_envmap.deinit();
                                 break :blk try startSession(allocator, user_z, info, &pam, &session_envmap, opts.vt);

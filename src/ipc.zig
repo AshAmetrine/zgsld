@@ -18,7 +18,7 @@ const IpcEventType = enum {
     pam_request,
     pam_response,
     pam_auth_result,
-    pam_cancel,
+    login_cancel,
     start_session,
     set_session_env,
 };
@@ -64,7 +64,7 @@ pub const IpcEvent = union(IpcEventType) {
     pam_request: PamConvRequest,
     pam_response: PamConvResponse,
     pam_auth_result: PamAuthResult,
-    pam_cancel: void,
+    login_cancel: void,
     start_session: SessionInfo,
     set_session_env: SessionEnvVar,
 };
@@ -126,7 +126,7 @@ pub const Ipc = struct {
                     .user = event_buf[0..payload_len :0],
                 },
             },
-            .pam_cancel => IpcEvent.pam_cancel,
+            .login_cancel => IpcEvent.login_cancel,
             .pam_message => blk: {
                 if (payload_len < 1) return error.InvalidPayload;
                 const is_error = event_buf[0] != 0;
@@ -191,8 +191,8 @@ pub const Ipc = struct {
                 try writeHeader(io_writer, .pam_start_auth, user_len);
                 try io_writer.writeAll(ev.user);
             },
-            .pam_cancel => {
-                try writeHeader(io_writer,.pam_cancel,0);
+            .login_cancel => {
+                try writeHeader(io_writer, .login_cancel, 0);
             },
             .pam_message => |info| {
                 const msg_len: u32 = @intCast(info.message.len);
