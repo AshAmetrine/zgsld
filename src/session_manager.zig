@@ -138,7 +138,19 @@ pub fn spawnGreeter(greeter_argv: [:null]const ?[*:0]const u8, greeter_user: []c
         const zgsld_sock = try std.fmt.bufPrintZ(&fd_buf, "ZGSLD_SOCK={d}", .{fds[1]});
         var xdg_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
         const xdg_runtime_dir = try std.fmt.bufPrintZ(&xdg_buf, "XDG_RUNTIME_DIR={s}", .{runtime_dir});
-        const greeter_environ: [*:null]const ?[*:0]const u8 = &.{ zgsld_sock, xdg_runtime_dir, null };
+
+        var path_env: ?[*:0]const u8 = null;
+        const envp = std.c.environ;
+        var i: usize = 0;
+        while (envp[i] != null) : (i += 1) {
+            const entry = envp[i].?;
+            if (std.mem.startsWith(u8, std.mem.span(entry), "PATH=")) {
+                path_env = entry;
+                break;
+            }
+        }
+
+        const greeter_environ: [*:null]const ?[*:0]const u8 = &.{ zgsld_sock, xdg_runtime_dir, path_env, null };
 
         if (std.posix.geteuid() == 0) {
             if (c.initgroups(greeter_user_z, pw.gid) != 0) {
