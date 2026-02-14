@@ -24,16 +24,18 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption(?u8, "vt", null);
     const build_options_mod = build_options.createModule();
 
+    const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
+    const pam = b.dependency("pam", .{ .target = target, .optimize = optimize });
 
-    const ipc_mod = b.addModule("zgsld", .{
+    _ = b.addModule("zgsld", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options_mod },
+            .{ .name = "pam", .module = pam.module("pam") },
+        },
     });
-    ipc_mod.addImport("build_options", build_options_mod);
-    ipc_mod.linkSystemLibrary("pam",.{});
-
-    const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
 
     const exe = b.addExecutable(.{
         .name = "zgsld",
@@ -44,12 +46,11 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "build_options", .module = build_options_mod },
                 .{ .name = "clap", .module = clap.module("clap") },
+                .{ .name = "pam", .module = pam.module("pam") },
             },
             .link_libc = true,
         }),
     });
-
-    exe.linkSystemLibrary("pam");
 
     b.installArtifact(exe);
 

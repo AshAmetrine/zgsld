@@ -1,5 +1,5 @@
 const std = @import("std");
-const pam_module = @import("auth/pam.zig");
+const pam_module = @import("pam");
 const Pam = pam_module.Pam;
 const ipc_module = @import("ipc.zig");
 const builtin = @import("builtin");
@@ -31,6 +31,13 @@ const SessionEnvKey = enum {
     XDG_SESSION_TYPE,
 };
 
+pub const PamCtx = struct {
+    cancelled: bool,
+    ipc_conn: *ipc_module.Ipc,
+    reader: *std.Io.Reader,
+    writer: *std.Io.Writer,
+};
+
 pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
     var event_buf: [ipc_module.GREETER_BUF_SIZE]u8 = undefined;
     var rbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
@@ -52,18 +59,25 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
             .pam_start_auth => |auth| {
                 const user_z = try allocator.dupeZ(u8, auth.user);
                 defer allocator.free(user_z);
-                var ctx = pam_module.PamCtx{
+                var ctx: PamCtx = .{
                     .cancelled = false,
-                    .user = user_z,
-                    .ipc = opts.ipc_conn,
+                    .ipc_conn = opts.ipc_conn,
                     .reader = ipc_reader,
                     .writer = ipc_writer,
                 };
-                var pam = try Pam.init(opts.service_name, &ctx, allocator);
+                var pam_state: Pam(PamCtx).ConvState = .{ 
+                    .conv = loginConv, 
+                    .ctx = &ctx, 
+                };
+                var pam = try Pam(PamCtx).init(allocator, .{ 
+                    .service_name = opts.service_name, 
+                    .user = null, 
+                    .state = &pam_state,
+                });
                 defer pam.deinit();
-                try pam.setItem(pam_module.pam.PAM_USER, user_z);
+                try pam.setItem(.{ .user = user_z });
 
-                pam.authenticate() catch {
+                pam.authenticate(.{}) catch {
                     if (ctx.cancelled) {
                         log.debug("Pam auth cancelled", .{});
                         continue;
@@ -74,6 +88,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                     ipc_writer.flush() catch {};
                     continue;
                 };
+                try pam.accountMgmt(.{});
 
                 const ok = ipc_module.IpcEvent{ .pam_auth_result = .{ .ok = true } };
                 try opts.ipc_conn.writeEvent(ipc_writer, &ok);
@@ -120,7 +135,7 @@ fn startSession(
     allocator: std.mem.Allocator,
     user: [:0]const u8,
     info: ipc_module.SessionInfo,
-    pam: *Pam,
+    pam: *Pam(PamCtx),
     session_envmap: *std.process.EnvMap,
     vt: ?u8,
 ) !std.posix.fd_t {
@@ -145,12 +160,12 @@ fn startSession(
     try pam.putEnv("XDG_SESSION_CLASS=user");
 
     if (std.posix.geteuid() == 0) {
-        try pam.establishCred();
-        try pam.openSession();
+        try pam.setCred(.{ .action = .establish });
+        try pam.openSession(.{});
     }
 
     // Add pam env list to the envmap (overwrites)
-    try pam.putEnvList(session_envmap);
+    try pam.addEnvListToMap(session_envmap);
 
     if (pw.dir) |home_dir| {
         const s = std.mem.span(home_dir);
@@ -168,8 +183,8 @@ fn startSession(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), session_envmap);
- 
-    const user_info: UserInfo = .{ 
+
+    const user_info: UserInfo = .{
         .user = user,
         .uid = pw.uid,
         .gid = pw.gid,
@@ -276,4 +291,54 @@ fn buildArgv(allocator: std.mem.Allocator, argv_buf: []const u8) ![]?[*:0]const 
     }
     argv[arg_index] = null;
     return argv;
+}
+
+fn loginConv(
+    _: std.mem.Allocator,
+    msgs: pam_module.Messages,
+    ctx: *PamCtx,
+) !void {
+    if (ctx.cancelled) return error.Abort;
+
+    const ipc_reader = ctx.reader;
+    const ipc_writer = ctx.writer;
+
+    var ipc_buf: [ipc_module.PAM_CONV_BUF_SIZE]u8 = undefined;
+    defer std.crypto.secureZero(u8, &ipc_buf);
+
+    var iter = msgs.iter();
+    while (try iter.next()) |msg| {
+        switch (msg) {
+            .prompt_echo_off, .prompt_echo_on => |m| {
+                try ctx.ipc_conn.writeEvent(ipc_writer, &.{
+                    .pam_request = .{
+                        .echo = msg == .prompt_echo_on,
+                        .message = m.message,
+                    },
+                });
+                try ipc_writer.flush();
+
+                const event = try ctx.ipc_conn.readEvent(ipc_reader, &ipc_buf);
+                switch (event) {
+                    .pam_response => |resp_bytes| {
+                        try m.respond(resp_bytes);
+                    },
+                    .login_cancel => {
+                        ctx.cancelled = true;
+                        return error.Abort;
+                    },
+                    else => unreachable,
+                }
+            },
+            .text_info, .error_msg => |m| {
+                try ctx.ipc_conn.writeEvent(ipc_writer, &.{
+                    .pam_message = .{
+                        .is_error = msg == .error_msg,
+                        .message = m,
+                    },
+                });
+                try ipc_writer.flush();
+            },
+        }
+    }
 }

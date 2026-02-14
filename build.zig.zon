@@ -8,6 +8,9 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
             .hash = "1220cf08a633c05eeb3b7a8317045c0f7f50d0300b9534b3e47ede19c033780ef824",
         },
+        .pam = .{
+            .path = "../zig-pam",
+        },
     },
     .paths = .{
         "build.zig",
