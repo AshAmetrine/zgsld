@@ -4,6 +4,7 @@ const Pam = pam_module.Pam;
 const ipc_module = @import("ipc.zig");
 const builtin = @import("builtin");
 const log = std.log.scoped(.zgsld_worker);
+const vt_mod = @import("vt.zig");
 const c = @cImport({
     if (builtin.os.tag == .linux) {
         @cInclude("grp.h");
@@ -110,6 +111,8 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                             try session_envmap.put(env.key, env.value);
                         },
                         .start_session => |info| {
+                            log.debug("Waiting for greeter EOF before starting session...", .{});
+                            waitForGreeterEof(opts.ipc_conn, ipc_reader, &event_buf);
                             log.debug("Starting session...", .{});
                             const pid = blk: {
                                 defer session_envmap.deinit();
@@ -129,6 +132,22 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
         }
     }
     return false;
+}
+
+fn waitForGreeterEof(
+    ipc_conn: *ipc_module.Ipc,
+    ipc_reader: *std.Io.Reader,
+    event_buf: []u8,
+) void {
+    while (true) {
+        _ = ipc_conn.readEvent(ipc_reader, event_buf) catch |err| switch (err) {
+            error.EndOfStream => return,
+            else => {
+                log.err("IPC read error while waiting for greeter EOF: {s}", .{@errorName(err)});
+                return;
+            },
+        };
+    }
 }
 
 fn startSession(
@@ -217,6 +236,11 @@ fn startCommandSession(
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
     if (session_pid == 0) {
+        vt_mod.redirectStdioToControllingTty() catch {
+            log.err("Failed to redirect session stdio", .{});
+            std.process.exit(1);
+        };
+
         if (std.posix.geteuid() == 0) {
             if (c.initgroups(user_info.user, user_info.gid) != 0) std.process.exit(1);
             std.posix.setgid(user_info.gid) catch std.process.exit(1);

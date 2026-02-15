@@ -19,11 +19,16 @@ pub const SessionManagerRunOpts = struct {
 };
 
 pub fn run(opts: SessionManagerRunOpts) !void {
-    if (opts.vt) |vt_id| {
-        vt.initTty(vt_id) catch |err| {
-            log.err("Failed to init VT {d}: {s}", .{ vt_id, @errorName(err) });
-            return err;
+    if (opts.vt) |vt_num| {
+        vt.initTty(vt_num) catch |err| {
+            log.err("Failed to init VT {d}: {s}", .{ vt_num, @errorName(err) });
+            std.process.exit(1);
         };
+    }
+
+    if (!try userExists(opts.greeter_user)) {
+        log.err("Greeter user not found: {s}", .{ opts.greeter_user });
+        return error.GreeterUserNotFound;
     }
 
     while (true) {
@@ -43,6 +48,9 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             break :blk .{ .worker = worker_pid, .greeter = greeter_pid };
         };
 
+        _ = std.posix.waitpid(child_pids.greeter, 0);
+        log.info("Greeter stopped", .{});
+
         const status = std.posix.waitpid(child_pids.worker, 0);
         log.info("Worker stopped", .{});
 
@@ -52,8 +60,6 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         } else {
             log.info("Session executed successfully", .{});
         }
-
-        _ = std.posix.waitpid(child_pids.greeter, 0);
 
         if (opts.vt) |vt_id| {
             vt.resetTty(vt_id) catch |err| {
@@ -122,6 +128,13 @@ pub fn spawnGreeter(
     if (pid == 0) {
         std.posix.close(close_fd);
 
+        const log_fd = captureGreeterLogFd();
+        var log_fd_buf: [64]u8 = undefined;
+        var log_fd_env: ?[*:0]const u8 = null;
+        if (log_fd) |fd| {
+            log_fd_env = std.fmt.bufPrintZ(&log_fd_buf, "ZGSLD_LOG={d}", .{fd}) catch null;
+        }
+
         var fd_buf: [32]u8 = undefined;
         const zgsld_sock = try std.fmt.bufPrintZ(&fd_buf, "ZGSLD_SOCK={d}", .{ipc_fd});
         var xdg_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
@@ -138,7 +151,17 @@ pub fn spawnGreeter(
             }
         }
 
-        const greeter_environ: [*:null]const ?[*:0]const u8 = &.{ zgsld_sock, xdg_runtime_dir, path_env, null };
+        var greeter_env_buf: [5]?[*:0]const u8 = .{ zgsld_sock, xdg_runtime_dir } ++ .{ null } ** 3;
+        var greeter_env_len: usize = 2;
+        if (path_env) |path| {
+            greeter_env_buf[greeter_env_len] = path;
+            greeter_env_len += 1;
+        }
+        if (log_fd_env) |env| {
+            greeter_env_buf[greeter_env_len] = env;
+            greeter_env_len += 1;
+        }
+        const greeter_environ: [*:null]const ?[*:0]const u8 = @ptrCast(&greeter_env_buf);
 
         if (std.posix.geteuid() == 0) {
             if (c.initgroups(greeter_user_z, pw.gid) != 0) {
@@ -163,12 +186,29 @@ pub fn spawnGreeter(
 
         const greeter_path = greeter_argv[0].?;
         const argv = @as([*:null]const ?[*:0]const u8, @ptrCast(greeter_argv.ptr));
+
+        vt.redirectStdioToControllingTty() catch {
+            log.err("Failed to redirect greeter stdio", .{});
+        };
+
         std.posix.execvpeZ(greeter_path, argv, greeter_environ) catch {
             log.err("Greeter exec error\n", .{});
         };
         std.process.exit(1);
     }
     return pid;
+}
+
+fn userExists(user: []const u8) !bool {
+    var user_buf: [64]u8 = undefined;
+    const user_z = try std.fmt.bufPrintZ(&user_buf, "{s}", .{user});
+    return std.c.getpwnam(user_z) != null;
+}
+
+fn captureGreeterLogFd() ?std.posix.fd_t {
+    const fd = std.posix.dup(std.posix.STDERR_FILENO) catch return null;
+    _ = std.posix.fcntl(fd, std.posix.F.SETFD, 0) catch {};
+    return fd;
 }
 
 fn createSocketPair() ![2]std.posix.fd_t {

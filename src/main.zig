@@ -92,7 +92,7 @@ pub fn main() !void {
         // TODO: check default config path
     }
 
-    const greeter_path = res.args.@"greeter-cmd".?;
+    const greeter_path = res.args.@"greeter-cmd" orelse return error.NullGreeterCmd;
     const greeter_args = res.positionals[0];
 
     var greeter_argv = try buildGreeterArgv(allocator, greeter_path, greeter_args);

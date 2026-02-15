@@ -1,8 +1,12 @@
 const std = @import("std");
 const build_options = @import("build_options");
+pub const logging = @import("logging.zig");
 const session_manager_mod = if (build_options.standalone) @import("session_manager.zig") else struct {};
 const session_worker_mod = if (build_options.standalone) @import("session_worker.zig") else struct {};
 const utils = @import("utils.zig");
+
+pub const initZgsldLog = logging.initZgsldLog;
+pub const logFn = logging.logFn;
 
 pub const session_manager = session_manager_mod;
 pub const session_worker = session_worker_mod;
@@ -131,14 +135,10 @@ pub const Zgsld = struct {
             return;
         }
 
-        log.info("Greeter Started", .{});
-
         try self.vtable.run(.{
             .allocator = self.allocator,
             .ipc = ipc_conn,
         });
-
-        log.info("Greeter Exiting...", .{});
     }
 
     fn runStandalone(self: Zgsld) !void {
