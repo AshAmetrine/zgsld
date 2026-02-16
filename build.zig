@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) !void {
 
     const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
     const pam = b.dependency("pam", .{ .target = target, .optimize = optimize });
+    const zigini = b.dependency("zigini", .{ .target = target, .optimize = optimize });
 
     _ = b.addModule("zgsld", .{
         .root_source_file = b.path("src/root.zig"),
@@ -46,6 +47,7 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "build_options", .module = build_options_mod },
                 .{ .name = "clap", .module = clap.module("clap") },
+                .{ .name = "zigini", .module = zigini.module("zigini") },
                 .{ .name = "pam", .module = pam.module("pam") },
             },
             .link_libc = true,

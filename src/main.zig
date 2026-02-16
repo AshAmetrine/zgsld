@@ -1,11 +1,12 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const ipc = @import("ipc.zig");
 const session_manager = @import("session_manager.zig");
 const session_worker = @import("session_worker.zig");
 const utils = @import("utils.zig");
+const ZgsldConfig = @import("Config.zig");
 
 const clap = @import("clap");
+const zigini = @import("zigini");
 
 const log = std.log.scoped(.zgsld);
 
@@ -30,34 +31,11 @@ const GreeterArgv = struct {
 
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
-    const is_worker = utils.isSessionWorker();
 
-    var sock_fd: ?std.posix.fd_t = null;
-    if (std.posix.getenv("ZGSLD_SOCK")) |sock| {
-        sock_fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
-    }
-
-    if (sock_fd) |fd| {
-        if (!is_worker) {
-            log.err("ZGSLD_SOCK set without --session-worker", .{});
-            return error.UnexpectedSessionWorker;
-        }
-
-        var ipc_conn = ipc.Ipc.initFromFd(fd);
-        defer ipc_conn.deinit();
-
-        const service_name = std.posix.getenv("ZGSLD_SERVICE_NAME") orelse build_options.service_name;
+    if (utils.isSessionWorker()) {
         log.info("Session Worker Started", .{});
-        _ = try session_worker.run(allocator, .{
-            .service_name = service_name,
-            .ipc_conn = &ipc_conn,
-        });
+        try session_worker.runFromArgs(allocator);
         return;
-    }
-
-    if (is_worker) {
-        log.err("Session worker requires ZGSLD_SOCK", .{});
-        return error.MissingZgsldSock;
     }
 
     const params = comptime clap.parseParamsComptime(clap_param_str);
@@ -85,12 +63,19 @@ pub fn main() !void {
         std.process.exit(0);
     }
 
-    if (res.args.config) |config_path| {
-        // TODO: check config_path
-        _ = config_path;
-    } else {
-        // TODO: check default config path
-    }
+    var conf_ini = zigini.Ini(ZgsldConfig).init(allocator);
+    defer conf_ini.deinit();
+   
+    const config_path = res.args.config orelse "/etc/zgsld/zgsld.ini";
+    var config = conf_ini.readFileToStruct(config_path,.{}) catch |err| switch (err) {
+        error.FileNotFound => blk: {
+            log.debug("No Config File Found", .{});
+            break :blk ZgsldConfig{};
+        },
+        else => return err
+    };
+
+    if (res.args.vt) |vt| config.vt = vt;
 
     const greeter_path = res.args.@"greeter-cmd" orelse return error.NullGreeterCmd;
     const greeter_args = res.positionals[0];
@@ -102,9 +87,7 @@ pub fn main() !void {
     try session_manager.run(.{
         .self_exe_path = self_exe_path_z,
         .greeter_argv = greeter_argv.argv_ptrs,
-        .greeter_user = build_options.greeter_user,
-        .service_name = build_options.service_name,
-        .vt = res.args.vt,
+        .config = config,
     });
 }
 

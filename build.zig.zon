@@ -11,6 +11,10 @@
         .pam = .{
             .path = "../zig-pam",
         },
+        .zigini = .{
+            .url = "git+https://github.com/Kawaii-Ash/zigini#737c1131dcdc778a964536f6ee7b368304cdb2df",
+            .hash = "zigini-0.3.2-BSkB7UVDAADbz1WyGY1dV6hd7FhCKKD51N5uTxu-tjcq",
+        },
     },
     .paths = .{
         "build.zig",

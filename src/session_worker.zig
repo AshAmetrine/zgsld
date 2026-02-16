@@ -23,6 +23,7 @@ pub const SessionWorkerRunOpts = struct {
     service_name: []const u8,
     ipc_conn: *ipc_module.Ipc,
     vt: ?u8 = null,
+    greeter_pid: std.posix.pid_t,
 };
 
 const SessionEnvKey = enum {
@@ -39,10 +40,39 @@ pub const PamCtx = struct {
     writer: *std.Io.Writer,
 };
 
-pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
+pub fn runFromArgs(allocator: std.mem.Allocator) !void {
+    const argv = std.os.argv;
+    const service = std.mem.span(argv[2]);
+    const user = std.mem.span(argv[3]);
+    const start: usize = 5;
+
+    const greeter_len = argv.len - start;
+    const greeter_ptr: [*]const ?[*:0]const u8 = @ptrCast(argv.ptr + start);
+    const greeter_argv = greeter_ptr[0..greeter_len :null];
+
+    const fds = try createSocketPair();
+
+    const greeter_pid = blk: {
+        defer std.posix.close(fds[1]);
+        errdefer std.posix.close(fds[0]);
+        break :blk try spawnGreeter(greeter_argv, user, fds[1], fds[0]);
+    };
+
+    var ipc_conn = ipc_module.Ipc.initFromFd(fds[0]);
+    defer ipc_conn.deinit();
+
+    try run(allocator, .{
+        .service_name = service,
+        .ipc_conn = &ipc_conn,
+        .greeter_pid = greeter_pid,
+    });
+}
+
+pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !void {
     var event_buf: [ipc_module.GREETER_BUF_SIZE]u8 = undefined;
     var rbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
     var wbuf: [ipc_module.IPC_IO_BUF_SIZE]u8 = undefined;
+    var saw_auth = false;
 
     var reader = opts.ipc_conn.reader(&rbuf);
     var writer = opts.ipc_conn.writer(&wbuf);
@@ -51,13 +81,19 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
 
     while (true) {
         log.debug("Waiting for event", .{});
-        const event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
+        const event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
+            if (err == error.EndOfStream and !saw_auth) {
+                std.process.exit(2);
+            }
+            return err;
+        };
         switch (event) {
             .login_cancel => {
                 log.debug("Login cancelled before auth start", .{});
                 continue;
             },
             .pam_start_auth => |auth| {
+                saw_auth = true;
                 const user_z = try allocator.dupeZ(u8, auth.user);
                 defer allocator.free(user_z);
                 var ctx: PamCtx = .{
@@ -66,13 +102,13 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                     .reader = ipc_reader,
                     .writer = ipc_writer,
                 };
-                var pam_state: Pam(PamCtx).ConvState = .{ 
-                    .conv = loginConv, 
-                    .ctx = &ctx, 
+                var pam_state: Pam(PamCtx).ConvState = .{
+                    .conv = loginConv,
+                    .ctx = &ctx,
                 };
-                var pam = try Pam(PamCtx).init(allocator, .{ 
-                    .service_name = opts.service_name, 
-                    .user = null, 
+                var pam = try Pam(PamCtx).init(allocator, .{
+                    .service_name = opts.service_name,
+                    .user = null,
                     .state = &pam_state,
                 });
                 defer pam.deinit();
@@ -111,8 +147,8 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                             try session_envmap.put(env.key, env.value);
                         },
                         .start_session => |info| {
-                            log.debug("Waiting for greeter EOF before starting session...", .{});
-                            waitForGreeterEof(opts.ipc_conn, ipc_reader, &event_buf);
+                            log.debug("Waiting for greeter exit before starting session...", .{});
+                            _ = std.posix.waitpid(opts.greeter_pid, 0);
                             log.debug("Starting session...", .{});
                             const pid = blk: {
                                 defer session_envmap.deinit();
@@ -120,8 +156,8 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
                             };
 
                             log.debug("Waiting for session to end...", .{});
-                            const status = std.posix.waitpid(pid, 0);
-                            std.process.exit(std.c.W.EXITSTATUS(status.status));
+                            _ = std.posix.waitpid(pid, 0);
+                            std.process.exit(0);
                         },
                         else => unreachable,
                     }
@@ -131,23 +167,122 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !bool {
             else => unreachable,
         }
     }
-    return false;
 }
 
-fn waitForGreeterEof(
-    ipc_conn: *ipc_module.Ipc,
-    ipc_reader: *std.Io.Reader,
-    event_buf: []u8,
-) void {
-    while (true) {
-        _ = ipc_conn.readEvent(ipc_reader, event_buf) catch |err| switch (err) {
-            error.EndOfStream => return,
-            else => {
-                log.err("IPC read error while waiting for greeter EOF: {s}", .{@errorName(err)});
-                return;
-            },
+fn ensureRuntimeDir(path: []const u8, uid: std.posix.uid_t, gid: std.posix.gid_t) !void {
+    std.posix.mkdir(path, 0o700) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
+    var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
+    defer dir.close();
+
+    try dir.chmod(0o700);
+    try dir.chown(uid, gid);
+}
+
+pub fn spawnGreeter(
+    greeter_argv: [:null]const ?[*:0]const u8,
+    greeter_user: []const u8,
+    ipc_fd: std.posix.fd_t,
+    close_fd: std.posix.fd_t,
+) !std.posix.pid_t {
+    var user_buf: [64]u8 = undefined;
+    const greeter_user_z = try std.fmt.bufPrintZ(&user_buf, "{s}", .{greeter_user});
+
+    const pw = std.c.getpwnam(greeter_user_z) orelse return error.GreeterUserNotFound;
+
+    var runtime_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/run/user/{d}", .{pw.uid});
+    ensureRuntimeDir(runtime_dir, pw.uid, pw.gid) catch {
+        runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/tmp", .{});
+    };
+
+    const pid = try std.posix.fork();
+    if (pid == 0) {
+        std.posix.close(close_fd);
+
+        var fd_buf: [32]u8 = undefined;
+        const zgsld_sock = try std.fmt.bufPrintZ(&fd_buf, "ZGSLD_SOCK={d}", .{ipc_fd});
+        var xdg_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
+        const xdg_runtime_dir = try std.fmt.bufPrintZ(&xdg_buf, "XDG_RUNTIME_DIR={s}", .{runtime_dir});
+
+        var path_env: ?[*:0]const u8 = null;
+
+        const envp = std.c.environ;
+        var i: usize = 0;
+        while (envp[i]) |entry| : (i += 1) {
+            const span = std.mem.span(entry);
+            if (std.mem.startsWith(u8, span, "PATH=")) {
+                path_env = entry;
+                break;
+            }
+        }
+
+        const log_fd = std.posix.dup(std.posix.STDERR_FILENO) catch null;
+        if (log_fd) |fd| {
+            _ = std.posix.fcntl(fd, std.posix.F.SETFD, 0) catch {};
+        }
+        var log_env: ?[*:0]const u8 = null;
+        var log_buf: [64]u8 = undefined;
+        if (log_fd) |fd| {
+            log_env = std.fmt.bufPrintZ(&log_buf, "ZGSLD_LOG={d}", .{fd}) catch null;
+        }
+
+        var greeter_env_buf: [5]?[*:0]const u8 = .{ zgsld_sock, xdg_runtime_dir } ++ .{ null } ** 3;
+        var greeter_env_len: usize = 2;
+        if (path_env) |path| {
+            greeter_env_buf[greeter_env_len] = path;
+            greeter_env_len += 1;
+        }
+        if (log_env) |env| {
+            greeter_env_buf[greeter_env_len] = env;
+            greeter_env_len += 1;
+        }
+        const greeter_environ: [*:null]const ?[*:0]const u8 = @ptrCast(&greeter_env_buf);
+
+        if (std.posix.geteuid() == 0) {
+            if (c.initgroups(greeter_user_z, pw.gid) != 0) {
+                const err = std.posix.errno(-1);
+                log.err("initgroups failed: {s}", .{@tagName(err)});
+                std.process.exit(1);
+            }
+            std.posix.setgid(pw.gid) catch {
+                log.err("setgid error", .{});
+                std.process.exit(1);
+            };
+            std.posix.setuid(pw.uid) catch {
+                log.err("setuid error", .{});
+                std.process.exit(1);
+            };
+        }
+
+        if (greeter_argv.len == 0 or greeter_argv[0] == null or greeter_argv[greeter_argv.len] != null) {
+            log.err("Invalid greeter argv", .{});
+            std.process.exit(1);
+        }
+
+        const greeter_path = greeter_argv[0].?;
+        const argv = @as([*:null]const ?[*:0]const u8, @ptrCast(greeter_argv.ptr));
+
+        vt_mod.redirectStdioToControllingTty() catch {
+            log.err("Failed to redirect greeter stdio", .{});
         };
+
+        std.posix.execvpeZ(greeter_path, argv, greeter_environ) catch {
+            log.err("Greeter exec error\n", .{});
+        };
+        std.process.exit(1);
     }
+    return pid;
+}
+
+fn createSocketPair() ![2]std.posix.fd_t {
+    var fds: [2]std.posix.fd_t = undefined;
+    const rc = std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
+    if (rc != 0) return std.posix.unexpectedErrno(std.posix.errno(rc));
+    return fds;
 }
 
 fn startSession(
@@ -266,9 +401,7 @@ fn buildProfileShellCommand(
     defer list.deinit(allocator);
     try list.appendSlice(allocator, prefix);
 
-    var argc: usize = 0;
-    while (argc < argv.len and argv[argc] != null) : (argc += 1) {}
-    for (argv[0..argc]) |arg| {
+    for (argv) |arg| {
         try list.append(allocator, ' ');
         try appendShellEscaped(allocator, &list, std.mem.span(arg.?));
     }
@@ -290,30 +423,29 @@ fn appendShellEscaped(allocator: std.mem.Allocator, list: *std.ArrayList(u8), ar
 
 fn buildArgv(allocator: std.mem.Allocator, argv_buf: []const u8) ![]?[*:0]const u8 {
     // argv_buf must be NUL-separated arguments with a trailing NUL.
-    if (argv_buf.len == 0 or argv_buf[argv_buf.len - 1] != 0) {
+    if (argv_buf.len == 0
+        or argv_buf[argv_buf.len - 1] != 0
+        or argv_buf[0] == 0)
+    {
         return error.InvalidPayload;
     }
-    if (argv_buf[0] == 0) return error.InvalidPayload;
 
     var argc: usize = 0;
-    for (argv_buf) |b| {
-        if (b == 0) argc += 1;
-    }
+    for (argv_buf) |b| { if (b == 0) argc += 1; }
 
-    var argv = try allocator.alloc(?[*:0]const u8, argc + 1);
+    var argv = try allocator.allocSentinel(?[*:0]const u8, argc, null);
     errdefer allocator.free(argv);
+
     var arg_index: usize = 0;
     var start: usize = 0;
-    var i: usize = 0;
-    while (i < argv_buf.len) : (i += 1) {
-        if (argv_buf[i] == 0) {
+    for (argv_buf,0..) |ch,i| {
+        if (ch == 0) {
             if (i == start) return error.InvalidPayload;
             argv[arg_index] = @ptrCast(argv_buf.ptr + start);
             arg_index += 1;
             start = i + 1;
         }
     }
-    argv[arg_index] = null;
     return argv;
 }
 

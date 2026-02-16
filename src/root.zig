@@ -1,36 +1,23 @@
 const std = @import("std");
 const build_options = @import("build_options");
 pub const logging = @import("logging.zig");
-const session_manager_mod = if (build_options.standalone) @import("session_manager.zig") else struct {};
-const session_worker_mod = if (build_options.standalone) @import("session_worker.zig") else struct {};
+const session_manager = if (build_options.standalone) @import("session_manager.zig") else struct {};
+const session_worker = if (build_options.standalone) @import("session_worker.zig") else struct {};
 const utils = @import("utils.zig");
+
+const log = std.log.scoped(.zgsld);
 
 pub const initZgsldLog = logging.initZgsldLog;
 pub const logFn = logging.logFn;
 
-pub const session_manager = session_manager_mod;
-pub const session_worker = session_worker_mod;
+pub const ipc = @import("ipc.zig");
+const Ipc = ipc.Ipc;
 
-const ipc = @import("ipc.zig");
-pub const Ipc = ipc.Ipc;
-pub const IpcEvent = ipc.IpcEvent;
-pub const IPC_IO_BUF_SIZE = ipc.IPC_IO_BUF_SIZE;
-pub const GREETER_BUF_SIZE = ipc.GREETER_BUF_SIZE;
-pub const PAM_CONV_BUF_SIZE = ipc.PAM_CONV_BUF_SIZE;
-pub const PAM_START_BUF_SIZE = ipc.PAM_START_BUF_SIZE;
-pub const SessionInfo = ipc.SessionInfo;
-
-const log = std.log.scoped(.zgsld);
-
-pub const ZgsldConfig = struct {
-    service_name: []const u8 = build_options.service_name,
-    greeter_user: []const u8 = build_options.greeter_user,
-    vt: ?u8 = build_options.vt,
-};
+pub const ZgsldConfig = @import("Config.zig");
 
 pub const GreeterContext = struct {
     allocator: std.mem.Allocator,
-    ipc: *ipc.Ipc,
+    ipc: *Ipc,
 };
 
 pub const ConfigureContext = struct {
@@ -102,6 +89,12 @@ pub const Zgsld = struct {
     }
 
     pub fn run(self: Zgsld) !void {
+        if (build_options.standalone and utils.isSessionWorker()) {
+            log.info("Session Worker Started", .{});
+            try session_worker.runFromArgs(self.allocator);
+            return;
+        }
+
         var sock_fd: ?std.posix.fd_t = null;
         if (std.posix.getenv("ZGSLD_SOCK")) |sock| {
             sock_fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
@@ -111,7 +104,11 @@ pub const Zgsld = struct {
             var ipc_conn = Ipc.initFromFd(fd);
             defer ipc_conn.deinit();
 
-            try self.runWithIpc(&ipc_conn);
+            try self.vtable.run(.{
+                .allocator = self.allocator,
+                .ipc = &ipc_conn,
+            });
+
             return;
         }
 
@@ -122,23 +119,6 @@ pub const Zgsld = struct {
             log.err("Is the greeter being run by zgsld?", .{});
             return error.MissingZgsldSock;
         }
-    }
-
-    fn runWithIpc(self: Zgsld, ipc_conn: *Ipc) !void {
-        if (build_options.standalone and utils.isSessionWorker()) {
-            const service_name = std.posix.getenv("ZGSLD_SERVICE_NAME") orelse build_options.service_name;
-            log.info("Session Worker Started", .{});
-            _ = try session_worker_mod.run(self.allocator, .{
-                .service_name = service_name,
-                .ipc_conn = ipc_conn,
-            });
-            return;
-        }
-
-        try self.vtable.run(.{
-            .allocator = self.allocator,
-            .ipc = ipc_conn,
-        });
     }
 
     fn runStandalone(self: Zgsld) !void {
@@ -156,11 +136,9 @@ pub const Zgsld = struct {
                 });
             }
 
-            const settings = greeterSettingsFromConfig(zgsld_config);
-
             log.debug("Greeter Path: {s}", .{self_exe_path_z});
-            log.debug("Greeter User: {s}", .{settings.greeter_user});
-            log.debug("Pam Service Name: {s}", .{settings.service_name});
+            log.debug("Greeter User: {s}", .{zgsld_config.greeter_user});
+            log.debug("Pam Service Name: {s}", .{zgsld_config.service_name});
 
             const greeter_argv_buf = try self.allocator.alloc(?[*:0]const u8, std.os.argv.len + 1);
             defer self.allocator.free(greeter_argv_buf);
@@ -168,35 +146,10 @@ pub const Zgsld = struct {
             for (std.os.argv, 0..) |arg, i| greeter_argv_buf[i] = arg;
             const greeter_argv = greeter_argv_buf[0..std.os.argv.len :null];
 
-            try runSessionManager(self_exe_path_z, greeter_argv, settings);
-        } else {
-            unreachable;
-        }
-    }
-
-    fn greeterSettingsFromConfig(config: ZgsldConfig) GreeterSettings {
-        return .{
-            .greeter_user = config.greeter_user,
-            .service_name = config.service_name,
-            .vt = @as(?u8, config.vt),
-        };
-    }
-
-    fn runSessionManager(
-        self_exe_path_z: [:0]const u8,
-        greeter_argv: [:null]const ?[*:0]const u8,
-        settings: GreeterSettings,
-    ) !void {
-        if (build_options.standalone) {
-            if (settings.vt) |vt| {
-                log.debug("VT: {d}", .{vt});
-            }
-            try session_manager_mod.run(.{
+            try session_manager.run(.{
                 .self_exe_path = self_exe_path_z,
                 .greeter_argv = greeter_argv,
-                .greeter_user = settings.greeter_user,
-                .service_name = settings.service_name,
-                .vt = settings.vt,
+                .config = zgsld_config,
             });
         } else {
             unreachable;
