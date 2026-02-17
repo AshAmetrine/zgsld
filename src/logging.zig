@@ -20,9 +20,9 @@ pub fn logFn(
     var stream = std.io.fixedBufferStream(&buffer);
     const writer = stream.writer();
 
-    const level_txt = comptime level.asText();
-    const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    writer.print(level_txt ++ prefix ++ format ++ "\n", args) catch return;
+    const prefix = if (scope == .default) ": " else "[" ++ @tagName(scope) ++ "]";
+    const level_txt = "[" ++ comptime level.asText() ++ "] ";
+    writer.print(prefix ++ level_txt ++ format ++ "\n", args) catch return;
 
     const msg = stream.getWritten();
     _ = std.posix.write(fd, msg) catch return;
