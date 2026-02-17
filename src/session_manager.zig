@@ -4,6 +4,8 @@ const log = std.log.scoped(.zgsld);
 const ZgsldConfig = @import("config.zig").Config;
 const build_options = @import("build_options");
 
+var active_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
+var shutdown_requested = std.atomic.Value(u8).init(0);
 
 pub const SessionManagerRunOpts = struct {
     self_exe_path: [:0]const u8,
@@ -12,6 +14,8 @@ pub const SessionManagerRunOpts = struct {
 };
 
 pub fn run(opts: SessionManagerRunOpts) !void {
+    installSignalHandlers();
+
     if (opts.config.vt) |vt_num| {
         vt.initTty(vt_num) catch |err| {
             log.err("Failed to init VT {d}: {s}", .{ vt_num, @errorName(err) });
@@ -28,6 +32,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         defer if (opts.config.vt) |vt_id| {
             vt.resetTty(vt_id) catch {};
         };
+        if (shutdown_requested.load(.seq_cst) != 0) return;
 
         log.debug("Spawning worker...", .{});
         const worker_pid = try spawnWorker(
@@ -37,9 +42,18 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.greeter_argv,
             if (build_options.x11_support) opts.config.x11.cmd else null,
         );
+        active_worker_pid.store(worker_pid, .seq_cst);
+        if (shutdown_requested.load(.seq_cst) != 0) {
+            std.posix.kill(worker_pid, std.posix.SIG.TERM) catch {};
+        }
 
         const status = std.posix.waitpid(worker_pid, 0);
+        active_worker_pid.store(0, .seq_cst);
         log.info("Worker stopped", .{});
+        if (shutdown_requested.load(.seq_cst) != 0) {
+            log.debug("Shutdown requested; exiting after worker cleanup", .{});
+            return;
+        }
         const st = status.status;
         const code: u8 = if (std.c.W.IFEXITED(st)) std.c.W.EXITSTATUS(st) else 1;
         if (code != 0) {
@@ -49,6 +63,34 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             }
             return error.WorkerError;
         }
+    }
+}
+
+fn installSignalHandlers() void {
+    const sigact = std.posix.Sigaction{
+        .handler = .{ .handler = forwardSignalToWorker },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+
+    const forward_signals = [_]u8{
+        std.posix.SIG.TERM,
+        std.posix.SIG.INT,
+        std.posix.SIG.HUP,
+        std.posix.SIG.QUIT,
+    };
+
+    for (forward_signals) |sig| {
+        std.posix.sigaction(sig, &sigact, null);
+    }
+}
+
+fn forwardSignalToWorker(sig: i32) callconv(.c) void {
+    const pid = active_worker_pid.load(.seq_cst);
+    const sig_u8: u8 = @intCast(sig);
+    shutdown_requested.store(1, .seq_cst);
+    if (pid > 0) {
+        std.posix.kill(pid, sig_u8) catch {};
     }
 }
 
