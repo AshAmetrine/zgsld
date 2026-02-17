@@ -3,7 +3,7 @@ const build_options = @import("build_options");
 const session_manager = @import("session_manager.zig");
 const session_worker = @import("session_worker.zig");
 const utils = @import("utils.zig");
-const ZgsldConfig = @import("Config.zig");
+const ZgsldConfig = @import("config.zig").Config;
 
 const clap = @import("clap");
 const zigini = @import("zigini");
@@ -77,10 +77,15 @@ pub fn main() !void {
 
     if (res.args.vt) |vt| config.vt = vt;
 
-    const greeter_path = res.args.@"greeter-cmd" orelse return error.NullGreeterCmd;
-    const greeter_args = res.positionals[0];
-
-    var greeter_argv = try buildGreeterArgv(allocator, greeter_path, greeter_args);
+    var greeter_argv: GreeterArgv = undefined;
+    if (res.args.@"greeter-cmd") |greeter_path| {
+        greeter_argv = try buildGreeterArgv(allocator, greeter_path, res.positionals[0]);
+    } else if (config.greeter_cmd) |cmd| {
+        if (cmd.len == 0) return error.NullGreeterCmd;
+        greeter_argv = try buildGreeterArgvFromCommandLine(allocator, cmd, res.positionals[0]);
+    } else {
+        return error.NullGreeterCmd;
+    }
     defer greeter_argv.deinit();
 
     const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
@@ -116,4 +121,27 @@ fn buildGreeterArgv(
         .argv_ptrs = argv_ptrs[0..argv_len :null],
         .arena = arena,
     };
+}
+
+fn buildGreeterArgvFromCommandLine(
+    allocator: std.mem.Allocator,
+    command_line: []const u8,
+    extra_args: []const []const u8,
+) !GreeterArgv {
+    var parts = std.ArrayList([]const u8).empty;
+    defer parts.deinit(allocator);
+
+    var it = std.mem.tokenizeAny(u8, command_line, " \t\r\n");
+    while (it.next()) |part| {
+        try parts.append(allocator, part);
+    }
+    if (parts.items.len == 0) return error.NullGreeterCmd;
+
+    if (extra_args.len != 0) {
+        try parts.appendSlice(allocator, extra_args);
+    }
+
+    const cmd = parts.items[0];
+    const args = parts.items[1..];
+    return try buildGreeterArgv(allocator, cmd, args);
 }

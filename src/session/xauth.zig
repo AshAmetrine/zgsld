@@ -40,10 +40,16 @@ fn mcookie() [Md5.digest_length]u8 {
 }
 
 // var xauth_buf: [256]u8 = undefined;
-pub fn createXauthEntry(buf: []u8, display_num: []const u8, home: []const u8) ![]const u8 {
+pub fn createXauthEntry(
+    buf: []u8,
+    display_num: []const u8,
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+    runtime_dir: ?[]const u8,
+) ![]const u8 {
     if (display_num.len == 0) return error.InvalidDisplay;
 
-    const xauth_file = try createUniqueXauthFile(buf, home);
+    const xauth_file = try createUniqueXauthFile(buf, uid, gid, runtime_dir);
     errdefer _ = std.fs.deleteFileAbsolute(xauth_file.path) catch {};
     defer xauth_file.file.close();
 
@@ -71,39 +77,64 @@ const XauthDir = struct {
 };
 
 fn dirExists(path: []const u8) bool {
-    var dir = std.fs.cwd().openDir(path, .{}) catch return false;
+    var dir = std.fs.openDirAbsolute(path, .{}) catch return false;
     dir.close();
     return true;
 }
 
-const XauthPath = struct {
-    dirname: []const u8,
-    filename: []const u8,
-};
+fn ensureDir(
+    path: []const u8,
+    mode: u32,
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+) !void {
+    std.posix.mkdir(path, mode) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
 
-fn resolveXauthPath(buf: []u8, home: []const u8) ![]const u8 {
-    var xauth_dir: []const u8 = undefined;
-    const xdg_rt_dir = std.posix.getenv("XDG_RUNTIME_DIR");
+    var dir = try std.fs.openDirAbsolute(path, .{});
+    defer dir.close();
 
-    var xauth_file: []const u8 = "Xauthority";
-    if (xdg_rt_dir == null or !dirExists(xdg_rt_dir.?)) {
-        // fallback to $HOME/.Xauthority
-        xauth_dir = home;
-        xauth_file = ".Xauthority";
-    } else {
-        // /run/user/UID/Xauthority
-        xauth_dir = xdg_rt_dir.?;
+    const stat = try std.posix.fstat(dir.fd);
+    if (stat.uid != uid or stat.gid != gid) {
+        if (std.posix.geteuid() != 0) return error.PermissionDenied;
+        try dir.chown(uid, gid);
+    }
+    try dir.chmod(mode);
+}
+
+fn resolveXauthDir(
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+    user_dir_buf: []u8,
+    runtime_dir_opt: ?[]const u8,
+) ![]const u8 {
+    if (runtime_dir_opt) |runtime_dir_raw| {
+        const runtime_dir = std.mem.trimRight(u8, runtime_dir_raw, "/");
+        if (runtime_dir.len != 0 and dirExists(runtime_dir)) {
+            return runtime_dir;
+        }
     }
 
-    xauth_dir = std.mem.trimRight(u8, xauth_dir, "/");
-    return try std.fmt.bufPrint(buf, "{s}/{s}",.{xauth_dir,xauth_file});
+    const base_dir = "/tmp/zgsld";
+    try ensureDir(base_dir, 0o755, 0, 0);
+
+    const user_dir = try std.fmt.bufPrint(user_dir_buf, "{s}/{d}", .{ base_dir, uid });
+    try ensureDir(user_dir, 0o700, uid, gid);
+    return user_dir;
 }
 
 /// Finds a suitable dir to store the Xauth file, 
 /// then creates the file with a unique id.
-fn createUniqueXauthFile(buf: []u8, home: []const u8) !XauthDir {
+fn createUniqueXauthFile(
+    buf: []u8,
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+    runtime_dir: ?[]const u8,
+) !XauthDir {
     var base_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const xauth_path = try resolveXauthPath(&base_buf, home);
+    const xauth_dir = try resolveXauthDir(uid, gid, &base_buf, runtime_dir);
 
     var attempts: usize = 0;
     while (attempts < 16) : (attempts += 1) {
@@ -112,8 +143,8 @@ fn createUniqueXauthFile(buf: []u8, home: []const u8) !XauthDir {
         const id = std.fmt.bytesToHex(&raw, .lower);
         const xauthority = try std.fmt.bufPrint(
             buf,
-            "{s}-{s}",
-            .{ xauth_path, id },
+            "{s}/Xauthority-{s}",
+            .{ xauth_dir, id },
         );
         const file = std.fs.createFileAbsolute(xauthority, .{
             .mode = 0o600,
@@ -123,6 +154,11 @@ fn createUniqueXauthFile(buf: []u8, home: []const u8) !XauthDir {
             error.PathAlreadyExists => continue,
             else => return err,
         };
+        errdefer {
+            file.close();
+            std.fs.deleteFileAbsolute(xauthority) catch {};
+        }
+        try file.chown(uid, gid);
         return .{ .file = file, .path = xauthority, };
     }
 

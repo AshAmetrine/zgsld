@@ -1,7 +1,8 @@
 const std = @import("std");
 const vt = @import("vt.zig");
 const log = std.log.scoped(.zgsld);
-const ZgsldConfig = @import("Config.zig");
+const ZgsldConfig = @import("config.zig").Config;
+const build_options = @import("build_options");
 
 
 pub const SessionManagerRunOpts = struct {
@@ -34,6 +35,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.config.service_name,
             opts.config.greeter_user,
             opts.greeter_argv,
+            if (build_options.x11_support) opts.config.x11.cmd else null,
         );
 
         const status = std.posix.waitpid(worker_pid, 0);
@@ -55,6 +57,7 @@ pub fn spawnWorker(
     service_name: []const u8,
     greeter_user: []const u8,
     greeter_argv: [:null]const ?[*:0]const u8,
+    x11_cmd: ?[]const u8,
 ) !std.posix.pid_t {
     const pid = try std.posix.fork();
     if (pid == 0) {
@@ -87,8 +90,27 @@ pub fn spawnWorker(
 
         @memmove(argv[5..], greeter_argv);
 
+        var worker_environ: [*:null]const ?[*:0]const u8 = std.c.environ;
+        var x11_env_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
+        var env_storage: ?[]?[*:0]const u8 = null;
+
+        if (x11_cmd) |cmd| {
+            const x11_env = try std.fmt.bufPrintZ(&x11_env_buf, "ZGSLD_X11_CMD={s}", .{cmd});
+
+            var env_count: usize = 0;
+            while (std.c.environ[env_count] != null) : (env_count += 1) {}
+
+            env_storage = try allocator.allocSentinel(?[*:0]const u8, env_count + 1, null);
+            var i: usize = 0;
+            while (std.c.environ[i]) |entry| : (i += 1) {
+                env_storage.?[i] = entry;
+            }
+            env_storage.?[env_count] = x11_env;
+            worker_environ = @ptrCast(env_storage.?.ptr);
+        }
+
         const argv_ptr: [*:null]const ?[*:0]const u8 = argv.ptr;
-        std.posix.execvpeZ(worker_path, argv_ptr, std.c.environ) catch {
+        std.posix.execvpeZ(worker_path, argv_ptr, worker_environ) catch {
             log.err("Worker exec error\n", .{});
         };
         std.process.exit(1);
