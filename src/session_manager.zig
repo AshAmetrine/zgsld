@@ -29,9 +29,12 @@ pub fn run(opts: SessionManagerRunOpts) !void {
     }
 
     while (true) {
-        defer if (opts.config.vt) |vt_id| {
-            vt.resetTty(vt_id) catch {};
-        };
+        defer {
+            if (opts.config.vt) |vt_id| {
+                vt.resetTty(vt_id) catch {};
+            }
+            vt.resetTermios();
+        }
         if (shutdown_requested.load(.seq_cst) != 0) return;
 
         log.debug("Spawning worker...", .{});

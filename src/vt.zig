@@ -62,6 +62,17 @@ pub fn resetTty(tty: u8) !void {
     try setTextMode(tty_file.handle);
 }
 
+pub fn resetTermios() void {
+    var termios = std.posix.tcgetattr(std.posix.STDIN_FILENO) catch {
+        return;
+    };
+    termios.lflag.ISIG = true;
+    termios.lflag.ICANON = true;
+    termios.lflag.ECHO = true;
+    termios.lflag.ECHONL = true;
+    std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, termios) catch {};
+}
+
 fn activateTty(tty: u8) !void {
     var console = try openConsoleFile();
     defer console.close();
