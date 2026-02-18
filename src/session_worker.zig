@@ -16,6 +16,9 @@ const c = @cImport({
 });
 const x11 = if (build_options.x11_support) @import("session/x11.zig") else struct{};
 
+var shutdown_signal = std.atomic.Value(u8).init(0);
+var active_child_pid = std.atomic.Value(std.posix.pid_t).init(0);
+
 pub const SessionWorkerRunOpts = struct {
     service_name: []const u8,
     ipc_conn: *ipc_module.Ipc,
@@ -38,6 +41,8 @@ pub const PamCtx = struct {
 };
 
 pub fn runFromArgs(allocator: std.mem.Allocator) !void {
+    installSignalHandlers();
+
     const argv = std.os.argv;
     const service = std.mem.span(argv[2]);
     const user = std.mem.span(argv[3]);
@@ -54,7 +59,10 @@ pub fn runFromArgs(allocator: std.mem.Allocator) !void {
         errdefer std.posix.close(fds[0]);
         break :blk try spawnGreeter(greeter_argv, user, fds[1], fds[0]);
     };
-
+    active_child_pid.store(greeter_pid, .seq_cst);
+    if (shutdownRequested()) {
+        forwardShutdownSignal(shutdown_signal.load(.seq_cst));
+    }
     var ipc_conn = ipc_module.Ipc.initFromFd(fds[0]);
     defer ipc_conn.deinit();
 
@@ -80,6 +88,7 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !void {
         log.debug("Waiting for event", .{});
         const event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
             if (err == error.EndOfStream and !saw_auth) {
+                if (shutdownRequested()) return;
                 std.process.exit(2);
             }
             return err;
@@ -132,7 +141,12 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !void {
                 errdefer session_envmap.deinit();
 
                 while (true) {
-                    const session_event = try opts.ipc_conn.readEvent(ipc_reader, &event_buf);
+                    const session_event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
+                        if (err == error.EndOfStream and shutdownRequested()) {
+                            std.process.exit(0);
+                        }
+                        return err;
+                    };
                     switch (session_event) {
                         .login_cancel => {
                             log.debug("Login cancelled before session start", .{});
@@ -146,6 +160,8 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !void {
                         .start_session => |info| {
                             log.debug("Waiting for greeter exit before starting session...", .{});
                             _ = std.posix.waitpid(opts.greeter_pid, 0);
+                            active_child_pid.store(0, .seq_cst);
+                            if (shutdownRequested()) return;
                             log.debug("Starting session...", .{});
                             var session = blk: {
                                 defer session_envmap.deinit();
@@ -162,8 +178,13 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !void {
                                 .Command => |pid| pid,
                                 .X11 => |x11_session| x11_session.client_pid,
                             };
+                            active_child_pid.store(session_pid, .seq_cst);
+                            if (shutdownRequested()) {
+                                forwardShutdownSignal(shutdown_signal.load(.seq_cst));
+                            }
                             _ = std.posix.waitpid(session_pid, 0);
-                            std.process.exit(0);
+                            active_child_pid.store(0, .seq_cst);
+                            return;
                         },
                         else => unreachable,
                     }
@@ -173,6 +194,41 @@ pub fn run(allocator: std.mem.Allocator, opts: SessionWorkerRunOpts) !void {
             else => unreachable,
         }
     }
+}
+
+fn shutdownRequested() bool {
+    return shutdown_signal.load(.seq_cst) != 0;
+}
+
+fn installSignalHandlers() void {
+    const sigact = std.posix.Sigaction{
+        .handler = .{ .handler = handleShutdownSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+
+    const forward_signals = [_]u8{
+        std.posix.SIG.TERM,
+        std.posix.SIG.HUP,
+        std.posix.SIG.QUIT,
+    };
+
+    for (forward_signals) |sig| {
+        std.posix.sigaction(sig, &sigact, null);
+    }
+}
+
+fn forwardShutdownSignal(sig: u8) void {
+    const child_pid = active_child_pid.load(.seq_cst);
+    if (child_pid > 0) {
+        std.posix.kill(child_pid, sig) catch {};
+    }
+}
+
+fn handleShutdownSignal(sig: i32) callconv(.c) void {
+    const sig_u8: u8 = @intCast(sig);
+    shutdown_signal.store(sig_u8, .seq_cst);
+    forwardShutdownSignal(sig_u8);
 }
 
 fn ensureRuntimeDir(
