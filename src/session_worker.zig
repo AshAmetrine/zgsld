@@ -2,18 +2,11 @@ const std = @import("std");
 const pam_module = @import("pam");
 const Pam = pam_module.Pam;
 const ipc_module = @import("ipc.zig");
-const builtin = @import("builtin");
 const log = std.log.scoped(.zgsld_worker);
 const vt_mod = @import("vt.zig");
 const UserInfo = @import("UserInfo.zig");
+const utils = @import("utils.zig");
 const build_options = @import("build_options");
-const c = @cImport({
-    if (builtin.os.tag == .linux) {
-        @cInclude("grp.h");
-    } else if (builtin.os.tag == .freebsd) {
-        @cInclude("unistd.h");
-    }
-});
 const x11 = if (build_options.x11_support) @import("session/x11.zig") else struct{};
 
 var shutdown_signal = std.atomic.Value(u8).init(0);
@@ -294,6 +287,11 @@ pub fn spawnGreeter(
     const greeter_user_z = try std.fmt.bufPrintZ(&user_buf, "{s}", .{greeter_user});
 
     const pw = std.c.getpwnam(greeter_user_z) orelse return error.GreeterUserNotFound;
+    const greeter_info: UserInfo = .{
+        .username = greeter_user_z,
+        .uid = pw.uid,
+        .gid = pw.gid,
+    };
 
     var runtime_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     var runtime_dir: []const u8 = undefined;
@@ -350,21 +348,7 @@ pub fn spawnGreeter(
         }
         const greeter_environ: [*:null]const ?[*:0]const u8 = @ptrCast(&greeter_env_buf);
 
-        if (std.posix.geteuid() == 0) {
-            if (c.initgroups(greeter_user_z, pw.gid) != 0) {
-                const err = std.posix.errno(-1);
-                log.err("initgroups failed: {s}", .{@tagName(err)});
-                std.process.exit(1);
-            }
-            std.posix.setgid(pw.gid) catch {
-                log.err("setgid error", .{});
-                std.process.exit(1);
-            };
-            std.posix.setuid(pw.uid) catch {
-                log.err("setuid error", .{});
-                std.process.exit(1);
-            };
-        }
+        utils.dropPrivileges(greeter_info) catch std.process.exit(1);
 
         if (greeter_argv.len == 0 or greeter_argv[0] == null or greeter_argv[greeter_argv.len] != null) {
             log.err("Invalid greeter argv", .{});
@@ -585,11 +569,7 @@ fn startCommandSession(
             std.process.exit(1);
         };
 
-        if (std.posix.geteuid() == 0) {
-            if (c.initgroups(user_info.username, user_info.gid) != 0) std.process.exit(1);
-            std.posix.setgid(user_info.gid) catch std.process.exit(1);
-            std.posix.setuid(user_info.uid) catch std.process.exit(1);
-        }
+        utils.dropPrivileges(user_info) catch std.process.exit(1);
 
         const cmd_path = argv[0] orelse std.process.exit(1);
         const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(argv.ptr);

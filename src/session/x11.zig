@@ -1,13 +1,6 @@
 const std = @import("std");
 const UserInfo = @import("../UserInfo.zig");
-const builtin = @import("builtin");
-const c = @cImport({
-    if (builtin.os.tag == .linux) {
-        @cInclude("grp.h");
-    } else if (builtin.os.tag == .freebsd) {
-        @cInclude("unistd.h");
-    }
-});
+const utils = @import("../utils.zig");
 
 pub const xauth = @import("xauth.zig");
 
@@ -26,11 +19,7 @@ pub fn startXServer(opts: XServerOpts) !std.posix.pid_t {
     const pid = try std.posix.fork();
     if (pid == 0) {
         if (opts.user) |u| {
-            if (std.posix.geteuid() == 0) {
-                if (c.initgroups(u.username, u.gid) != 0) std.process.exit(1);
-                std.posix.setgid(u.gid) catch std.process.exit(1);
-                std.posix.setuid(u.uid) catch std.process.exit(1);
-            }
+            utils.dropPrivileges(u) catch std.process.exit(1);
         }
 
         var display_buf: [16]u8 = undefined;
