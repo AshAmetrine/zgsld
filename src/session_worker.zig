@@ -224,15 +224,6 @@ fn handleShutdownSignal(sig: i32) callconv(.c) void {
     forwardShutdownSignal(sig_u8);
 }
 
-fn ensureRuntimeDir(
-    path: []const u8,
-    mode: u32,
-    uid: std.posix.uid_t,
-    gid: std.posix.gid_t,
-) !void {
-    try utils.ensureDirOwned(path, mode, uid, gid);
-}
-
 // Creates /tmp/zgsld/$UID for a user
 fn ensureFallbackRuntimeDir(
     buf: []u8,
@@ -240,10 +231,10 @@ fn ensureFallbackRuntimeDir(
     gid: std.posix.gid_t,
 ) ![]const u8 {
     const base_dir = "/tmp/zgsld";
-    try ensureRuntimeDir(base_dir, 0o755, 0, 0);
+    try utils.ensureDirOwned(base_dir, 0o755, 0, 0);
 
     const user_dir = try std.fmt.bufPrint(buf, "{s}/{d}", .{ base_dir, uid });
-    try ensureRuntimeDir(user_dir, 0o700, uid, gid);
+    try utils.ensureDirOwned(user_dir, 0o700, uid, gid);
     return user_dir;
 }
 
@@ -264,7 +255,7 @@ fn resolveUserRuntimeDir(
     }
 
     const user_dir = try std.fmt.bufPrint(buf, "/tmp/zgsld-{d}", .{uid});
-    try ensureRuntimeDir(user_dir, 0o700, uid, gid);
+    try utils.ensureDirOwned(user_dir, 0o700, uid, gid);
     return user_dir;
 }
 
@@ -291,7 +282,8 @@ pub fn spawnGreeter(
         runtime_dir = try resolveUserRuntimeDir(&runtime_dir_buf, pw.uid, pw.gid);
     } else {
         runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/run/user/{d}", .{pw.uid});
-        ensureRuntimeDir(runtime_dir, 0o700, pw.uid, pw.gid) catch {
+
+        utils.ensureDirOwned(runtime_dir, 0o700, pw.uid, pw.gid) catch {
             runtime_dir = try ensureFallbackRuntimeDir(&runtime_dir_buf, pw.uid, pw.gid);
         };
     }
