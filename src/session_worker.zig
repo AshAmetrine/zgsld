@@ -7,7 +7,7 @@ const vt_mod = @import("vt.zig");
 const UserInfo = @import("UserInfo.zig");
 const utils = @import("utils.zig");
 const build_options = @import("build_options");
-const x11 = if (build_options.x11_support) @import("session/x11.zig") else struct{};
+const x11 = if (build_options.x11_support) @import("session/x11.zig") else struct {};
 
 var shutdown_signal = std.atomic.Value(u8).init(0);
 var active_child_pid = std.atomic.Value(std.posix.pid_t).init(0);

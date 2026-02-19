@@ -24,7 +24,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
     }
 
     if (!try userExists(opts.config.greeter_user)) {
-        log.err("Greeter user not found: {s}", .{ opts.config.greeter_user });
+        log.err("Greeter user not found: {s}", .{opts.config.greeter_user});
         return error.GreeterUserNotFound;
     }
 

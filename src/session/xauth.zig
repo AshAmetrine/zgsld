@@ -56,7 +56,7 @@ pub fn createXauthEntry(
 
     const magic_cookie = mcookie();
 
-    const auth = Xauth {
+    const auth = Xauth{
         .family = .FamilyLocal,
         .address = "",
         .display_number = display_num,
@@ -67,7 +67,7 @@ pub fn createXauthEntry(
     var file_w_buf: [1024]u8 = undefined;
     var writer = xauth_file.file.writer(&file_w_buf);
 
-    try writeXauthRecord(&writer.interface,auth);
+    try writeXauthRecord(&writer.interface, auth);
     try writer.interface.flush();
     return xauth_file.path;
 }
@@ -104,7 +104,7 @@ fn resolveXauthDir(
     return user_dir;
 }
 
-/// Finds a suitable dir to store the Xauth file, 
+/// Finds a suitable dir to store the Xauth file,
 /// then creates the file with a unique id.
 fn createUniqueXauthFile(
     buf: []u8,
@@ -138,7 +138,10 @@ fn createUniqueXauthFile(
             std.fs.deleteFileAbsolute(xauthority) catch {};
         }
         try file.chown(uid, gid);
-        return .{ .file = file, .path = xauthority, };
+        return .{
+            .file = file,
+            .path = xauthority,
+        };
     }
 
     return error.PathAlreadyExists;

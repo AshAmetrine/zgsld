@@ -165,7 +165,10 @@ pub const Ipc = struct {
                 break :blk IpcEvent{
                     .start_session = .{
                         .session_type = session_type,
-                        .command = .{ .session_cmd = session_cmd, .source_profile = source_profile },
+                        .command = .{
+                            .session_cmd = session_cmd,
+                            .source_profile = source_profile,
+                        },
                     },
                 };
             },
@@ -241,5 +244,4 @@ pub const Ipc = struct {
             },
         }
     }
-
 };

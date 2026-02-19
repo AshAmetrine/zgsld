@@ -55,14 +55,14 @@ pub fn main() !void {
 
     var conf_ini = zigini.Ini(ZgsldConfig).init(allocator);
     defer conf_ini.deinit();
-   
+
     const config_path = res.args.config orelse "/etc/zgsld/zgsld.ini";
-    var config = conf_ini.readFileToStruct(config_path,.{}) catch |err| switch (err) {
+    var config = conf_ini.readFileToStruct(config_path, .{}) catch |err| switch (err) {
         error.FileNotFound => blk: {
             log.debug("No Config File Found", .{});
             break :blk ZgsldConfig{};
         },
-        else => return err
+        else => return err,
     };
 
     if (res.args.vt) |vt| config.vt = vt;

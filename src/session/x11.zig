@@ -15,7 +15,7 @@ const XServerOpts = struct {
 pub fn startXServer(opts: XServerOpts) !std.posix.pid_t {
     // Starting X server:
     // x_cmd -auth {s} {display_name} {vt}
-    
+
     const pid = try std.posix.fork();
     if (pid == 0) {
         if (opts.user) |u| {

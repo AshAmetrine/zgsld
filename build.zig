@@ -13,11 +13,11 @@ pub fn build(b: *std.Build) !void {
     }
     const standalone = if (b.pkg_hash.len == 0) false else standalone_opt;
 
-    const service_name = b.option([]const u8, "service-name","Set PAM service name") orelse "login";
-    const greeter_user = b.option([]const u8, "greeter-user","User that runs the greeter") orelse "greeter";
+    const service_name = b.option([]const u8, "service-name", "Set PAM service name") orelse "login";
+    const greeter_user = b.option([]const u8, "greeter-user", "User that runs the greeter") orelse "greeter";
 
     const x11_enabled = b.option(bool, "x11", "Enable X11 session support") orelse false;
-   
+
     const build_options = b.addOptions();
     build_options.addOption(bool, "standalone", standalone);
     build_options.addOption([]const u8, "version", version_str);
@@ -87,6 +87,10 @@ pub fn build(b: *std.Build) !void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    const fmt_step = b.step("fmt", "Format source files");
+    const fmt_cmd = b.addFmt(.{ .paths = &.{ "build.zig", "build.zig.zon", "src" } });
+    fmt_step.dependOn(&fmt_cmd.step);
 }
 
 fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) ![]const u8 {
