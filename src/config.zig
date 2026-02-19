@@ -35,7 +35,7 @@ fn configType() type {
         [_]Type.StructField{};
 
     const greeter = if (!build_options.standalone)
-        [_]Type.StructField{field("greeter_cmd", ?[]const u8, null)}
+        [_]Type.StructField{field("greeter_cmd", ?[:0]const u8, null)}
     else
         [_]Type.StructField{};
 
