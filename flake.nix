@@ -15,7 +15,7 @@
       in {
         default = pkgs.mkShell {
           name = "zgsld-devshell";
-          packages = with pkgs; [ zig zls linux-pam libxcb ];
+          packages = with pkgs; [ zig zls linux-pam ];
         };
       });
   };
