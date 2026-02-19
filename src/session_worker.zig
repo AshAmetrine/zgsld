@@ -561,17 +561,16 @@ fn startSession(
 }
 
 pub fn runSessionCommand(allocator: std.mem.Allocator, cmd: ipc_module.SessionCommand, user_info: UserInfo, environ: [:null]const ?[*:0]const u8) !std.posix.pid_t {
-    const argv = try buildArgv(allocator, cmd.argv);
-    defer allocator.free(argv);
+    const prefix = if (cmd.source_profile) blk: {
+        break :blk "[ -f /etc/profile ] && . /etc/profile; [ -f $HOME/.profile ] && . $HOME/.profile; exec ";
+    } else "exec ";
 
-    if (cmd.source_profile) {
-        const shell_cmd = try buildProfileShellCommand(allocator, argv);
-        defer allocator.free(shell_cmd);
-        const wrapper = [_]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
-        return try startCommandSession(user_info, &wrapper, environ);
-    }
+    const shell_cmd = try buildPrefixedShellCommand(allocator, prefix, cmd.session_cmd);
+    defer allocator.free(shell_cmd);
 
-    return try startCommandSession(user_info, argv, environ);
+    const wrapper = [_]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
+
+    return try startCommandSession(user_info, &wrapper, environ);
 }
 
 fn startCommandSession(
@@ -601,61 +600,19 @@ fn startCommandSession(
     return session_pid;
 }
 
-fn buildProfileShellCommand(
+fn buildPrefixedShellCommand(
     allocator: std.mem.Allocator,
-    argv: []?[*:0]const u8,
+    prefix: []const u8,
+    session_cmd: []const u8,
 ) ![:0]const u8 {
-    const prefix =
-        "[ -f /etc/profile ] && . /etc/profile; [ -f $HOME/.profile ] && . $HOME/.profile; exec";
-    var list = std.ArrayList(u8).empty;
+    const needs_space = prefix.len > 0 and prefix[prefix.len - 1] != ' ';
+    const total_len = prefix.len + @intFromBool(needs_space) + session_cmd.len;
+    var list = try std.ArrayList(u8).initCapacity(allocator, total_len);
     defer list.deinit(allocator);
-    try list.appendSlice(allocator, prefix);
-
-    for (argv) |arg| {
-        try list.append(allocator, ' ');
-        try appendShellEscaped(allocator, &list, std.mem.span(arg.?));
-    }
-
+    list.appendSliceAssumeCapacity(prefix);
+    if (needs_space) list.appendAssumeCapacity(' ');
+    list.appendSliceAssumeCapacity(session_cmd);
     return try list.toOwnedSliceSentinel(allocator, 0);
-}
-
-fn appendShellEscaped(allocator: std.mem.Allocator, list: *std.ArrayList(u8), arg: []const u8) !void {
-    try list.append(allocator, '\'');
-    for (arg) |ch| {
-        if (ch == '\'') {
-            try list.appendSlice(allocator, "'\\''");
-        } else {
-            try list.append(allocator, ch);
-        }
-    }
-    try list.append(allocator, '\'');
-}
-
-fn buildArgv(allocator: std.mem.Allocator, argv_buf: []const u8) ![]?[*:0]const u8 {
-    // argv_buf must be NUL-separated arguments with a trailing NUL.
-    if (argv_buf.len == 0 or argv_buf[argv_buf.len - 1] != 0 or argv_buf[0] == 0) {
-        return error.InvalidPayload;
-    }
-
-    var argc: usize = 0;
-    for (argv_buf) |b| {
-        if (b == 0) argc += 1;
-    }
-
-    var argv = try allocator.allocSentinel(?[*:0]const u8, argc, null);
-    errdefer allocator.free(argv);
-
-    var arg_index: usize = 0;
-    var start: usize = 0;
-    for (argv_buf, 0..) |ch, i| {
-        if (ch == 0) {
-            if (i == start) return error.InvalidPayload;
-            argv[arg_index] = @ptrCast(argv_buf.ptr + start);
-            arg_index += 1;
-            start = i + 1;
-        }
-    }
-    return argv;
 }
 
 fn loginConv(

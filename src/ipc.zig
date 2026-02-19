@@ -29,8 +29,7 @@ pub const SessionType = enum(u8) {
 };
 
 pub const SessionCommand = struct {
-    // NUL-separated argv with a trailing NUL.
-    argv: []const u8,
+    session_cmd: []const u8,
     source_profile: bool = true,
 };
 
@@ -159,14 +158,14 @@ pub const Ipc = struct {
                 if (payload_len < 3) return error.InvalidPayload;
                 const session_type: SessionType = @enumFromInt(event_buf[0]);
                 const flags = event_buf[1];
-                const argv = event_buf[2..payload_len];
-                if (argv[0] == 0) return error.InvalidPayload;
-                if (argv[argv.len - 1] != 0) return error.InvalidPayload;
+                const session_cmd = event_buf[2..payload_len];
+                if (session_cmd.len == 0) return error.InvalidPayload;
+
                 const source_profile = (flags & 0x01) != 0;
                 break :blk IpcEvent{
                     .start_session = .{
                         .session_type = session_type,
-                        .command = .{ .argv = argv, .source_profile = source_profile },
+                        .command = .{ .session_cmd = session_cmd, .source_profile = source_profile },
                     },
                 };
             },
@@ -222,15 +221,15 @@ pub const Ipc = struct {
             },
             .start_session => |info| {
                 const cmd = info.command;
-                if (cmd.argv.len == 0 or cmd.argv[cmd.argv.len - 1] != 0) {
+                if (cmd.session_cmd.len == 0) {
                     return error.InvalidPayload;
                 }
-                const payload_len: u32 = @intCast(cmd.argv.len + 2);
+                const payload_len: u32 = @intCast(cmd.session_cmd.len + 2);
                 try writeHeader(io_writer, .start_session, payload_len);
                 try io_writer.writeInt(u8, @intFromEnum(info.session_type), native);
                 const flags: u8 = if (cmd.source_profile) 0x01 else 0x00;
                 try io_writer.writeInt(u8, flags, native);
-                try io_writer.writeAll(cmd.argv);
+                try io_writer.writeAll(cmd.session_cmd);
             },
             .set_session_env => |env| {
                 if (std.mem.indexOfScalar(u8, env.key, '=') != null) return error.InvalidPayload;
