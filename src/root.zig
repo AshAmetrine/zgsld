@@ -93,7 +93,6 @@ pub const Zgsld = struct {
 
     pub fn run(self: Zgsld) !void {
         if (build_options.standalone and utils.isSessionWorker()) {
-            log.info("Session Worker Started", .{});
             try session_worker.runFromArgs(self.allocator);
             return;
         }
@@ -116,7 +115,6 @@ pub const Zgsld = struct {
         }
 
         if (build_options.standalone) {
-            log.info("Session Manager Started", .{});
             try self.runStandalone();
         } else {
             log.err("Is the greeter being run by zgsld?", .{});

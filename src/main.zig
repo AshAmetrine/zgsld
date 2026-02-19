@@ -23,7 +23,6 @@ pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
     if (utils.isSessionWorker()) {
-        log.info("Session Worker Started", .{});
         try session_worker.runFromArgs(allocator);
         return;
     }

@@ -52,7 +52,6 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
         const status = std.posix.waitpid(worker_pid, 0);
         active_worker_pid.store(0, .seq_cst);
-        log.info("Worker stopped", .{});
         if (shutdown_requested.load(.seq_cst) != 0) {
             log.debug("Shutdown requested; exiting after worker cleanup", .{});
             return;
