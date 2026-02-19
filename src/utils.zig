@@ -28,3 +28,25 @@ pub fn dropPrivileges(user_info: UserInfo) !void {
     try std.posix.setgid(user_info.gid);
     try std.posix.setuid(user_info.uid);
 }
+
+pub fn ensureDirOwned(
+    path: []const u8,
+    mode: u32,
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+) !void {
+    std.posix.mkdir(path, mode) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
+    var dir = try std.fs.openDirAbsolute(path, .{});
+    defer dir.close();
+
+    const stat = try std.posix.fstat(dir.fd);
+    if (stat.uid != uid or stat.gid != gid) {
+        if (std.posix.geteuid() != 0) return error.PermissionDenied;
+        try dir.chown(uid, gid);
+    }
+    try dir.chmod(mode);
+}

@@ -230,16 +230,7 @@ fn ensureRuntimeDir(
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
 ) !void {
-    std.posix.mkdir(path, mode) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
-    defer dir.close();
-
-    try dir.chmod(mode);
-    try dir.chown(uid, gid);
+    try utils.ensureDirOwned(path, mode, uid, gid);
 }
 
 // Creates /tmp/zgsld/$UID for a user

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Md5 = std.crypto.hash.Md5;
+const utils = @import("../utils.zig");
 
 const Family = enum(u16) {
     FamilyLocal = 256,
@@ -82,28 +83,6 @@ fn dirExists(path: []const u8) bool {
     return true;
 }
 
-fn ensureDir(
-    path: []const u8,
-    mode: u32,
-    uid: std.posix.uid_t,
-    gid: std.posix.gid_t,
-) !void {
-    std.posix.mkdir(path, mode) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    var dir = try std.fs.openDirAbsolute(path, .{});
-    defer dir.close();
-
-    const stat = try std.posix.fstat(dir.fd);
-    if (stat.uid != uid or stat.gid != gid) {
-        if (std.posix.geteuid() != 0) return error.PermissionDenied;
-        try dir.chown(uid, gid);
-    }
-    try dir.chmod(mode);
-}
-
 fn resolveXauthDir(
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
@@ -118,10 +97,10 @@ fn resolveXauthDir(
     }
 
     const base_dir = "/tmp/zgsld";
-    try ensureDir(base_dir, 0o755, 0, 0);
+    try utils.ensureDirOwned(base_dir, 0o755, 0, 0);
 
     const user_dir = try std.fmt.bufPrint(user_dir_buf, "{s}/{d}", .{ base_dir, uid });
-    try ensureDir(user_dir, 0o700, uid, gid);
+    try utils.ensureDirOwned(user_dir, 0o700, uid, gid);
     return user_dir;
 }
 
