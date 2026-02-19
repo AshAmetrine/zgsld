@@ -565,7 +565,7 @@ pub fn runSessionCommand(allocator: std.mem.Allocator, cmd: ipc_module.SessionCo
         break :blk "[ -f /etc/profile ] && . /etc/profile; [ -f $HOME/.profile ] && . $HOME/.profile; exec ";
     } else "exec ";
 
-    const shell_cmd = try buildPrefixedShellCommand(allocator, prefix, cmd.session_cmd);
+    const shell_cmd = try std.mem.concatWithSentinel(allocator, u8, &.{ prefix, cmd.session_cmd }, 0);
     defer allocator.free(shell_cmd);
 
     const wrapper = [_]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
@@ -598,21 +598,6 @@ fn startCommandSession(
     }
 
     return session_pid;
-}
-
-fn buildPrefixedShellCommand(
-    allocator: std.mem.Allocator,
-    prefix: []const u8,
-    session_cmd: []const u8,
-) ![:0]const u8 {
-    const needs_space = prefix.len > 0 and prefix[prefix.len - 1] != ' ';
-    const total_len = prefix.len + @intFromBool(needs_space) + session_cmd.len;
-    var list = try std.ArrayList(u8).initCapacity(allocator, total_len);
-    defer list.deinit(allocator);
-    list.appendSliceAssumeCapacity(prefix);
-    if (needs_space) list.appendAssumeCapacity(' ');
-    list.appendSliceAssumeCapacity(session_cmd);
-    return try list.toOwnedSliceSentinel(allocator, 0);
 }
 
 fn loginConv(
