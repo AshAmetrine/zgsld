@@ -1,8 +1,8 @@
 const std = @import("std");
 const build_options = @import("build_options");
 pub const logging = @import("logging.zig");
-const session_manager = if (build_options.standalone) @import("session_manager.zig") else struct {};
-const session_worker = if (build_options.standalone) @import("session_worker.zig") else struct {};
+const session_manager = if (build_options.standalone) @import("manager.zig") else struct {};
+const session_worker = if (build_options.standalone) @import("worker.zig") else struct {};
 const utils = @import("utils.zig");
 
 const log = std.log.scoped(.zgsld);
@@ -93,7 +93,8 @@ pub const Zgsld = struct {
 
     pub fn run(self: Zgsld) !void {
         if (build_options.standalone and utils.isSessionWorker()) {
-            try session_worker.runFromArgs(self.allocator);
+            var worker = session_worker.SessionWorker.init(.{ .allocator = self.allocator });
+            try worker.run();
             return;
         }
 

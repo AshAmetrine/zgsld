@@ -1,6 +1,6 @@
 const std = @import("std");
-const UserInfo = @import("../UserInfo.zig");
-const utils = @import("../utils.zig");
+const utils = @import("../../utils.zig");
+const UserInfo = utils.UserInfo;
 
 pub const xauth = @import("xauth.zig");
 

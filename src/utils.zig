@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const UserInfo = @import("UserInfo.zig");
 const c = @cImport({
     if (builtin.os.tag == .linux) {
         @cInclude("grp.h");
@@ -16,6 +15,12 @@ pub fn isSessionWorker() bool {
     }
     return false;
 }
+
+pub const UserInfo = struct {
+    username: [:0]const u8,
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+};
 
 pub fn dropPrivileges(user_info: UserInfo) !void {
     if (std.posix.geteuid() != 0) return;

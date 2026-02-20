@@ -44,6 +44,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.config.greeter_user,
             opts.greeter_cmd,
             if (build_options.x11_support) opts.config.x11.cmd else null,
+            opts.config.vt,
         );
         active_worker_pid.store(worker_pid, .seq_cst);
         if (shutdown_requested.load(.seq_cst) != 0) {
@@ -102,6 +103,7 @@ pub fn spawnWorker(
     greeter_user: []const u8,
     greeter_cmd: []const u8,
     x11_cmd: ?[]const u8,
+    vt_opt: ?u8,
 ) !std.posix.pid_t {
     // TODO: stop defining allocator here
     var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
@@ -113,6 +115,11 @@ pub fn spawnWorker(
 
     if (std.posix.getenv("PATH")) |path| {
         try worker_envmap.put("PATH", path);
+    }
+    if (vt_opt) |vt_num| {
+        var vt_buf: [4]u8 = undefined;
+        const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
+        try worker_envmap.put("ZGSLD_VTNR", vt_value);
     }
     if (x11_cmd) |cmd| {
         try worker_envmap.put("ZGSLD_X11_CMD", cmd);
