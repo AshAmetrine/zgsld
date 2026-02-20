@@ -141,15 +141,32 @@ pub const Zgsld = struct {
             log.debug("Greeter User: {s}", .{zgsld_config.greeter_user});
             log.debug("Pam Service Name: {s}", .{zgsld_config.service_name});
 
-            const greeter_argv_buf = try self.allocator.alloc(?[*:0]const u8, std.os.argv.len + 1);
-            defer self.allocator.free(greeter_argv_buf);
-            greeter_argv_buf[std.os.argv.len] = null;
-            for (std.os.argv, 0..) |arg, i| greeter_argv_buf[i] = arg;
-            const greeter_argv = greeter_argv_buf[0..std.os.argv.len :null];
+            const argv = std.os.argv;
+
+            var total: usize = 0;
+            for (argv) |arg| {
+                total += std.mem.span(arg).len;
+            }
+
+            if (argv.len > 1) {
+                total += argv.len - 1;
+            }
+
+            var buf = try self.allocator.alloc(u8, total);
+            defer self.allocator.free(buf);
+
+            var idx: usize = 0;
+            for (argv, 0..) |arg, i| {
+              if (i != 0) { buf[idx] = ' '; idx += 1; }
+              const s = std.mem.span(arg);
+              @memcpy(buf[idx .. idx + s.len], s);
+              idx += s.len;
+            }
+            const greeter_cmd: []const u8 = buf[0..idx];
 
             try session_manager.run(.{
                 .self_exe_path = self_exe_path_z,
-                .greeter_argv = greeter_argv,
+                .greeter_cmd = greeter_cmd,
                 .config = zgsld_config,
             });
         } else {

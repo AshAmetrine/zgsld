@@ -38,25 +38,33 @@ pub fn runFromArgs(allocator: std.mem.Allocator) !void {
 
     const argv = std.os.argv;
     const service = std.mem.span(argv[2]);
-    const user = std.mem.span(argv[3]);
-    const start: usize = 5;
+    const greeter_user = std.mem.span(argv[3]);
 
-    const greeter_len = argv.len - start;
-    const greeter_ptr: [*]const ?[*:0]const u8 = @ptrCast(argv.ptr + start);
-    const greeter_argv = greeter_ptr[0..greeter_len :null];
+    const greeter_cmd = std.posix.getenv("ZGSLD_GREETER_CMD").?;
 
     const fds = try createSocketPair();
 
-    const greeter_pid = blk: {
-        defer std.posix.close(fds[1]);
-        errdefer std.posix.close(fds[0]);
-        break :blk try spawnGreeter(greeter_argv, user, fds[1], fds[0]);
+    const pw = std.c.getpwnam(greeter_user) orelse return error.GreeterUserNotFound;
+    const greeter_user_info: UserInfo = .{
+        .username = greeter_user,
+        .uid = pw.uid,
+        .gid = pw.gid,
     };
+
+    const greeter_session = blk: {
+        defer std.posix.close(fds.child);
+        errdefer std.posix.close(fds.parent);
+        break :blk try spawnGreeter(allocator, greeter_cmd, greeter_user_info, fds.child);
+    };
+
+    // TODO: Temporary. We should be able to support X11 Greeters
+    const greeter_pid = greeter_session.Command;
+
     active_child_pid.store(greeter_pid, .seq_cst);
     if (shutdownRequested()) {
         forwardShutdownSignal(shutdown_signal.load(.seq_cst));
     }
-    var ipc_conn = ipc_module.Ipc.initFromFd(fds[0]);
+    var ipc_conn = ipc_module.Ipc.initFromFd(fds.parent);
     defer ipc_conn.deinit();
 
     try run(allocator, .{
@@ -259,105 +267,125 @@ fn resolveUserRuntimeDir(
     return user_dir;
 }
 
-pub fn spawnGreeter(
-    greeter_argv: [:null]const ?[*:0]const u8,
-    greeter_user: []const u8,
-    ipc_fd: std.posix.fd_t,
-    close_fd: std.posix.fd_t,
-) !std.posix.pid_t {
-    var user_buf: [64]u8 = undefined;
-    const greeter_user_z = try std.fmt.bufPrintZ(&user_buf, "{s}", .{greeter_user});
+pub fn startSession2(allocator: std.mem.Allocator, info: ipc_module.SessionInfo, session_envmap: *std.process.EnvMap, user: UserInfo) !Session {
+    if (!build_options.x11_support and info.session_type == .X11) {
+        return error.X11UnsupportedBuild;
+    }
 
-    const pw = std.c.getpwnam(greeter_user_z) orelse return error.GreeterUserNotFound;
-    const greeter_info: UserInfo = .{
-        .username = greeter_user_z,
-        .uid = pw.uid,
-        .gid = pw.gid,
+    var x11_setup: ?X11Setup = null;
+    errdefer if (x11_setup) |setup| {
+        std.fs.deleteFileAbsolute(setup.xauth_path) catch {};
+        allocator.free(setup.xauth_path);
     };
+    if (build_options.x11_support and info.session_type == .X11) {
+        const display_num = try x11.findFreeDisplay();
 
-    var runtime_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var runtime_dir: []const u8 = undefined;
-    if (std.posix.geteuid() != 0) {
-        // for previews, we can default to this
-        runtime_dir = try resolveUserRuntimeDir(&runtime_dir_buf, pw.uid, pw.gid);
-    } else {
-        runtime_dir = try std.fmt.bufPrint(&runtime_dir_buf, "/run/user/{d}", .{pw.uid});
+        var display_buf: [4]u8 = undefined;
+        const display_env = try std.fmt.bufPrint(&display_buf, ":{d}", .{display_num});
+        try session_envmap.put("DISPLAY", display_env);
 
-        utils.ensureDirOwned(runtime_dir, 0o700, pw.uid, pw.gid) catch {
-            runtime_dir = try ensureFallbackRuntimeDir(&runtime_dir_buf, pw.uid, pw.gid);
+        var xauth_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const runtime_dir = session_envmap.get("XDG_RUNTIME_DIR");
+        const xauth_path = try x11.xauth.createXauthEntry(&xauth_buf, display_env[1..], user.uid, user.gid, runtime_dir);
+        const xauth_path_z = try allocator.dupeZ(u8, xauth_path);
+        try session_envmap.put("XAUTHORITY", xauth_path_z);
+
+        x11_setup = .{
+            .display = display_num,
+            .xauth_path = xauth_path_z,
         };
     }
 
-    const pid = try std.posix.fork();
-    if (pid == 0) {
-        std.posix.close(close_fd);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), session_envmap);
 
-        var fd_buf: [32]u8 = undefined;
-        const zgsld_sock = try std.fmt.bufPrintZ(&fd_buf, "ZGSLD_SOCK={d}", .{ipc_fd});
-        var xdg_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
-        const xdg_runtime_dir = try std.fmt.bufPrintZ(&xdg_buf, "XDG_RUNTIME_DIR={s}", .{runtime_dir});
+    if (build_options.x11_support and info.session_type == .X11) {
+        const setup = x11_setup orelse return error.X11SetupMissing;
+        const x_cmd = std.posix.getenv("ZGSLD_X11_CMD") orelse "/bin/X";
+        const vt = session_envmap.get("XDG_VTNR");
+        const launcher_pid = try x11.startXServer(.{
+            .x_cmd = x_cmd,
+            .xauth_path = setup.xauth_path,
+            .display = setup.display,
+            .vt = vt,
+            .user = user,
+        });
 
-        var path_env: ?[*:0]const u8 = null;
-
-        const envp = std.c.environ;
-        var i: usize = 0;
-        while (envp[i]) |entry| : (i += 1) {
-            const span = std.mem.span(entry);
-            if (std.mem.startsWith(u8, span, "PATH=")) {
-                path_env = entry;
-                break;
+        errdefer {
+            if (x11.readXServerPid(setup.display)) |pid| {
+                std.posix.kill(pid, std.posix.SIG.TERM) catch {};
+                if (pid == launcher_pid) {
+                    _ = std.posix.waitpid(pid, 0);
+                }
+            }
+            if (launcher_pid > 0) {
+                std.posix.kill(launcher_pid, std.posix.SIG.TERM) catch {};
+                _ = std.posix.waitpid(launcher_pid, std.posix.W.NOHANG);
             }
         }
 
-        const log_fd = std.posix.dup(std.posix.STDERR_FILENO) catch null;
-        if (log_fd) |fd| {
-            _ = std.posix.fcntl(fd, std.posix.F.SETFD, 0) catch {};
-        }
-        var log_env: ?[*:0]const u8 = null;
-        var log_buf: [64]u8 = undefined;
-        if (log_fd) |fd| {
-            log_env = std.fmt.bufPrintZ(&log_buf, "ZGSLD_LOG={d}", .{fd}) catch null;
-        }
+        const server_info = try x11.waitForXServer(setup.display, launcher_pid, 5000);
 
-        var greeter_env_buf: [5]?[*:0]const u8 = .{ zgsld_sock, xdg_runtime_dir } ++ .{null} ** 3;
-        var greeter_env_len: usize = 2;
-        if (path_env) |path| {
-            greeter_env_buf[greeter_env_len] = path;
-            greeter_env_len += 1;
-        }
-        if (log_env) |env| {
-            greeter_env_buf[greeter_env_len] = env;
-            greeter_env_len += 1;
-        }
-        const greeter_environ: [*:null]const ?[*:0]const u8 = @ptrCast(&greeter_env_buf);
+        const client_pid = try runSessionCommand(allocator, info.command, user, session_environ);
 
-        utils.dropPrivileges(greeter_info) catch std.process.exit(1);
-
-        if (greeter_argv.len == 0 or greeter_argv[0] == null or greeter_argv[greeter_argv.len] != null) {
-            log.err("Invalid greeter argv", .{});
-            std.process.exit(1);
-        }
-
-        const greeter_path = greeter_argv[0].?;
-        const argv = @as([*:null]const ?[*:0]const u8, @ptrCast(greeter_argv.ptr));
-
-        vt_mod.redirectStdioToControllingTty() catch {
-            log.err("Failed to redirect greeter stdio", .{});
+        return .{
+            .X11 = .{
+                .client_pid = client_pid,
+                .launcher_pid = launcher_pid,
+                .server_pid = server_info.server_pid,
+                .server_detached = server_info.detached,
+                .xauth_path = setup.xauth_path,
+                .allocator = allocator,
+            },
         };
-
-        std.posix.execvpeZ(greeter_path, argv, greeter_environ) catch {
-            log.err("Greeter exec error\n", .{});
-        };
-        std.process.exit(1);
     }
-    return pid;
+
+    const session_pid = try runSessionCommand(allocator, info.command, user, session_environ);
+    return .{ .Command = session_pid };
 }
 
-fn createSocketPair() ![2]std.posix.fd_t {
+pub fn spawnGreeter(allocator: std.mem.Allocator, greeter_cmd: []const u8, user: UserInfo, ipc_fd: std.posix.fd_t) !Session {
+    var envmap = std.process.EnvMap.init(allocator);
+    defer envmap.deinit();
+
+    // TODO: PATH, XDG_RUNTIME_DIR (Can be taken from PAM)
+
+    var fd_buf: [16]u8 = undefined;
+    const zgsld_sock = try std.fmt.bufPrint(&fd_buf, "{d}", .{ipc_fd});
+    try envmap.put("ZGSLD_SOCK", zgsld_sock);
+
+    const log_fd = try std.posix.dup(std.posix.STDERR_FILENO);
+    var log_fd_buf: [16]u8 = undefined;
+    const log_fd_str = try std.fmt.bufPrintZ(&log_fd_buf, "{d}", .{log_fd});
+    try envmap.put("ZGSLD_LOG", log_fd_str);
+
+    const session_info: ipc_module.SessionInfo = .{ 
+        .session_type = .Command, 
+        .command = .{ 
+            .source_profile = false, 
+            .session_cmd = greeter_cmd, 
+        }, 
+    };
+
+    return try startSession2(allocator, session_info, &envmap, user);
+}
+
+const SocketPair = struct {
+    parent: std.posix.fd_t,
+    child: std.posix.fd_t,
+};
+
+fn createSocketPair() !SocketPair {
     var fds: [2]std.posix.fd_t = undefined;
     const rc = std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
     if (rc != 0) return std.posix.unexpectedErrno(std.posix.errno(rc));
-    return fds;
+
+    const flags = try std.posix.fcntl(fds[0], std.posix.F.GETFD, 0);
+    _ = try std.posix.fcntl(fds[0], std.posix.F.SETFD, flags |
+    std.posix.FD_CLOEXEC);
+
+    return .{ .parent = fds[0], .child = fds[1] };
 }
 
 const Session = union(ipc_module.SessionType) {
@@ -403,16 +431,7 @@ fn startSession(
     session_envmap: *std.process.EnvMap,
     vt: ?u8,
 ) !Session {
-    if (!build_options.x11_support and info.session_type == .X11) {
-        return error.X11UnsupportedBuild;
-    }
-
     const pw = std.c.getpwnam(user) orelse return error.UserUnknown;
-    var x11_setup: ?X11Setup = null;
-    errdefer if (x11_setup) |setup| {
-        std.fs.deleteFileAbsolute(setup.xauth_path) catch {};
-        allocator.free(setup.xauth_path);
-    };
 
     if (session_envmap.get("XDG_CURRENT_DESKTOP")) |v| {
         try pam.putEnvAlloc("XDG_CURRENT_DESKTOP", v);
@@ -453,78 +472,12 @@ fn startSession(
         try session_envmap.put("SHELL", std.mem.span(shell));
     }
 
-    if (build_options.x11_support and info.session_type == .X11) {
-        const display_num = try x11.findFreeDisplay();
-
-        var display_buf: [4]u8 = undefined;
-        const display_env = try std.fmt.bufPrint(&display_buf, ":{d}", .{display_num});
-        try session_envmap.put("DISPLAY", display_env);
-
-        var xauth_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const runtime_dir = session_envmap.get("XDG_RUNTIME_DIR");
-        const xauth_path = try x11.xauth.createXauthEntry(&xauth_buf, display_env[1..], pw.uid, pw.gid, runtime_dir);
-        const xauth_path_z = try allocator.dupeZ(u8, xauth_path);
-        try session_envmap.put("XAUTHORITY", xauth_path_z);
-
-        x11_setup = .{
-            .display = display_num,
-            .xauth_path = xauth_path_z,
-        };
-    }
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), session_envmap);
-
     const user_info: UserInfo = .{
         .username = user,
         .uid = pw.uid,
         .gid = pw.gid,
     };
-
-    if (build_options.x11_support and info.session_type == .X11) {
-        const setup = x11_setup orelse return error.X11SetupMissing;
-        const x_cmd = std.posix.getenv("ZGSLD_X11_CMD") orelse "/bin/X";
-
-        const launcher_pid = try x11.startXServer(.{
-            .x_cmd = x_cmd,
-            .xauth_path = setup.xauth_path,
-            .display = setup.display,
-            .vt = vt,
-            .user = user_info,
-        });
-
-        errdefer {
-            if (x11.readXServerPid(setup.display)) |pid| {
-                std.posix.kill(pid, std.posix.SIG.TERM) catch {};
-                if (pid == launcher_pid) {
-                    _ = std.posix.waitpid(pid, 0);
-                }
-            }
-            if (launcher_pid > 0) {
-                std.posix.kill(launcher_pid, std.posix.SIG.TERM) catch {};
-                _ = std.posix.waitpid(launcher_pid, std.posix.W.NOHANG);
-            }
-        }
-
-        const server_info = try x11.waitForXServer(setup.display, launcher_pid, 5000);
-
-        const client_pid = try runSessionCommand(allocator, info.command, user_info, session_environ);
-
-        return .{
-            .X11 = .{
-                .client_pid = client_pid,
-                .launcher_pid = launcher_pid,
-                .server_pid = server_info.server_pid,
-                .server_detached = server_info.detached,
-                .xauth_path = setup.xauth_path,
-                .allocator = allocator,
-            },
-        };
-    }
-
-    const session_pid = try runSessionCommand(allocator, info.command, user_info, session_environ);
-    return .{ .Command = session_pid };
+    return startSession2(allocator, info, session_envmap, user_info);
 }
 
 pub fn runSessionCommand(allocator: std.mem.Allocator, cmd: ipc_module.SessionCommand, user_info: UserInfo, environ: [:null]const ?[*:0]const u8) !std.posix.pid_t {

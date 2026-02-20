@@ -69,16 +69,10 @@ pub fn main() !void {
     if (config.greeter_cmd) |cmd| {
         if (cmd.len == 0) return error.NullGreeterCmd;
 
-        const greeter_argv = [_:null]?[*:0]const u8{
-            "/bin/sh",
-            "-c",
-            cmd.ptr,
-        };
-
         const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
         try session_manager.run(.{
             .self_exe_path = self_exe_path_z,
-            .greeter_argv = &greeter_argv,
+            .greeter_cmd = cmd,
             .config = config,
         });
         return;

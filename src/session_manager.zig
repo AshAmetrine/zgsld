@@ -9,7 +9,7 @@ var shutdown_requested = std.atomic.Value(u8).init(0);
 
 pub const SessionManagerRunOpts = struct {
     self_exe_path: [:0]const u8,
-    greeter_argv: [:null]const ?[*:0]const u8,
+    greeter_cmd: []const u8,
     config: ZgsldConfig,
 };
 
@@ -42,7 +42,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.self_exe_path,
             opts.config.service_name,
             opts.config.greeter_user,
-            opts.greeter_argv,
+            opts.greeter_cmd,
             if (build_options.x11_support) opts.config.x11.cmd else null,
         );
         active_worker_pid.store(worker_pid, .seq_cst);
@@ -100,61 +100,40 @@ pub fn spawnWorker(
     worker_path: [:0]const u8,
     service_name: []const u8,
     greeter_user: []const u8,
-    greeter_argv: [:null]const ?[*:0]const u8,
+    greeter_cmd: []const u8,
     x11_cmd: ?[]const u8,
 ) !std.posix.pid_t {
+    // TODO: stop defining allocator here
+    var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    var worker_envmap = std.process.EnvMap.init(arena_allocator);
+    defer worker_envmap.deinit();
+
+    if (std.posix.getenv("PATH")) |path| {
+        try worker_envmap.put("PATH", path);
+    }
+    if (x11_cmd) |cmd| {
+        try worker_envmap.put("ZGSLD_X11_CMD", cmd);
+    }
+    try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd);
+
+    const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
+
+    const service_z = try arena_allocator.dupeZ(u8, service_name);
+    const user_z = try arena_allocator.dupeZ(u8, greeter_user);
+
+    const argv = [_:null]?[*:0]const u8{ 
+        @ptrCast(worker_path.ptr), 
+        "--session-worker", 
+        service_z.ptr, 
+        user_z.ptr, 
+    };
+
     const pid = try std.posix.fork();
     if (pid == 0) {
-        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-        defer arena.deinit();
-        const allocator = arena.allocator();
-
-        const service_z = allocator.dupeZ(u8, service_name) catch {
-            log.err("Failed to build worker args", .{});
-            std.process.exit(1);
-        };
-        const user_z = allocator.dupeZ(u8, greeter_user) catch {
-            log.err("Failed to build worker args", .{});
-            std.process.exit(1);
-        };
-        const service_ptr: [*:0]const u8 = @ptrCast(service_z.ptr);
-        const user_ptr: [*:0]const u8 = @ptrCast(user_z.ptr);
-
-        const argv_len: usize = 5 + greeter_argv.len;
-        var argv = allocator.allocSentinel(?[*:0]const u8, argv_len, null) catch {
-            log.err("Failed to allocate worker args", .{});
-            std.process.exit(1);
-        };
-
-        argv[0] = @ptrCast(worker_path.ptr);
-        argv[1] = "--session-worker";
-        argv[2] = service_ptr;
-        argv[3] = user_ptr;
-        argv[4] = "--";
-
-        @memmove(argv[5..], greeter_argv);
-
-        var worker_environ: [*:null]const ?[*:0]const u8 = std.c.environ;
-        var x11_env_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
-        var env_storage: ?[]?[*:0]const u8 = null;
-
-        if (x11_cmd) |cmd| {
-            const x11_env = try std.fmt.bufPrintZ(&x11_env_buf, "ZGSLD_X11_CMD={s}", .{cmd});
-
-            var env_count: usize = 0;
-            while (std.c.environ[env_count] != null) : (env_count += 1) {}
-
-            env_storage = try allocator.allocSentinel(?[*:0]const u8, env_count + 1, null);
-            var i: usize = 0;
-            while (std.c.environ[i]) |entry| : (i += 1) {
-                env_storage.?[i] = entry;
-            }
-            env_storage.?[env_count] = x11_env;
-            worker_environ = @ptrCast(env_storage.?.ptr);
-        }
-
-        const argv_ptr: [*:null]const ?[*:0]const u8 = argv.ptr;
-        std.posix.execvpeZ(worker_path, argv_ptr, worker_environ) catch {
+        std.posix.execvpeZ(worker_path, &argv, worker_environ) catch {
             log.err("Worker exec error\n", .{});
         };
         std.process.exit(1);
