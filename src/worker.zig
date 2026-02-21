@@ -322,6 +322,13 @@ fn installSignalHandlers() void {
     for (forward_signals) |sig| {
         std.posix.sigaction(sig, &sigact, null);
     }
+
+    const alarm_sigact = std.posix.Sigaction{
+        .handler = .{ .handler = handleKillTimeout },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.ALRM, &alarm_sigact, null);
 }
 
 fn forwardShutdownSignal(sig: u8) void {
@@ -329,10 +336,20 @@ fn forwardShutdownSignal(sig: u8) void {
     if (child_pid > 0) {
         std.posix.kill(child_pid, sig) catch {};
     }
+    // 5s timeout until sigkill
+    _ = std.c.alarm(5);
 }
 
 fn handleShutdownSignal(sig: i32) callconv(.c) void {
     const sig_u8: u8 = @intCast(sig);
     shutdown_signal.store(sig_u8, .seq_cst);
     forwardShutdownSignal(sig_u8);
+}
+
+fn handleKillTimeout(_: i32) callconv(.c) void {
+    if (!shutdownRequested()) return;
+    const child_pid = active_child_pid.load(.seq_cst);
+    if (child_pid > 0) {
+        std.posix.kill(child_pid, std.posix.SIG.KILL) catch {};
+    }
 }
