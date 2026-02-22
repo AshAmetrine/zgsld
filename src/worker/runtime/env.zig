@@ -1,7 +1,6 @@
 const std = @import("std");
 const UserInfo = @import("user.zig").UserInfo;
 
-
 pub fn applyPamSessionEnv(
     pam: anytype,
     session_envmap: *std.process.EnvMap,

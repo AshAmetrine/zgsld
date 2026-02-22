@@ -157,10 +157,13 @@ pub const Zgsld = struct {
 
             var idx: usize = 0;
             for (argv, 0..) |arg, i| {
-              if (i != 0) { buf[idx] = ' '; idx += 1; }
-              const s = std.mem.span(arg);
-              @memcpy(buf[idx .. idx + s.len], s);
-              idx += s.len;
+                if (i != 0) {
+                    buf[idx] = ' ';
+                    idx += 1;
+                }
+                const s = std.mem.span(arg);
+                @memcpy(buf[idx .. idx + s.len], s);
+                idx += s.len;
             }
             const greeter_cmd: []const u8 = buf[0..idx];
 
