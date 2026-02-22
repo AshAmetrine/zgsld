@@ -2,7 +2,6 @@ const std = @import("std");
 const build_options = @import("build_options");
 const session_manager = @import("manager.zig");
 const worker = @import("worker.zig");
-const utils = @import("common.zig");
 const ZgsldConfig = @import("config.zig").Config;
 
 const clap = @import("clap");
@@ -22,7 +21,7 @@ const clap_param_str =
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
-    if (utils.isSessionWorker()) {
+    if (worker.isSessionWorker()) {
         var runtime = worker.WorkerRuntime.init(.{ .allocator = allocator });
         try runtime.run();
         return;
