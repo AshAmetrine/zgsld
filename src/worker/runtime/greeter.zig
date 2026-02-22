@@ -1,10 +1,9 @@
 const std = @import("std");
-const zgipc = @import("../ipc.zig");
+const zgipc = @import("ipc");
 const pam_mod = @import("pam");
-const utils = @import("../utils.zig");
+const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
 
-const UserInfo = utils.UserInfo;
 const Pam = pam_mod.Pam;
 const Session = session_mod.Session;
 

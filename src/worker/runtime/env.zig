@@ -1,7 +1,6 @@
 const std = @import("std");
-const utils = @import("../utils.zig");
+const UserInfo = @import("user.zig").UserInfo;
 
-const UserInfo = utils.UserInfo;
 
 pub fn applyPamSessionEnv(
     pam: anytype,

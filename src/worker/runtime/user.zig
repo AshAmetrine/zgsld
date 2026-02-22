@@ -8,14 +8,6 @@ const c = @cImport({
     }
 });
 
-pub fn isSessionWorker() bool {
-    var args = std.process.args();
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, "--session-worker", arg)) return true;
-    }
-    return false;
-}
-
 pub const UserInfo = struct {
     username: [:0]const u8,
     uid: std.posix.uid_t,

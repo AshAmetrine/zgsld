@@ -1,9 +1,9 @@
 const std = @import("std");
-const zgipc = @import("../ipc.zig");
-const vt_mod = @import("../vt.zig");
+const zgipc = @import("ipc");
+const tty = @import("tty.zig");
 const build_options = @import("build_options");
-const x11 = if (build_options.x11_support) @import("session/x11.zig") else struct {};
-const utils = @import("../utils.zig");
+const x11 = if (build_options.x11_support) @import("session/x11.zig");
+const utils = @import("user.zig");
 const UserInfo = utils.UserInfo;
 
 const log = std.log.scoped(.zgsld_worker);
@@ -169,7 +169,7 @@ fn startCommandSession(
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
     if (session_pid == 0) {
-        vt_mod.redirectStdioToControllingTty() catch {
+        tty.redirectStdioToControllingTty() catch {
             log.err("Failed to redirect session stdio", .{});
             std.process.exit(1);
         };

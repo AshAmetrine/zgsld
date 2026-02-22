@@ -1,6 +1,6 @@
 const std = @import("std");
 const Md5 = std.crypto.hash.Md5;
-const utils = @import("../../utils.zig");
+const utils = @import("../user.zig");
 
 const Family = enum(u16) {
     FamilyLocal = 256,

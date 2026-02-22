@@ -41,15 +41,6 @@ pub fn initTty(tty: u8) !void {
     if (status != 0) return error.FailedToSetControllingTty;
 }
 
-pub fn redirectStdioToControllingTty() !void {
-    var tty_file = try std.fs.openFileAbsolute("/dev/tty", .{ .mode = .read_write });
-    defer if (tty_file.handle > 2) tty_file.close();
-
-    try std.posix.dup2(tty_file.handle, std.posix.STDIN_FILENO);
-    try std.posix.dup2(tty_file.handle, std.posix.STDOUT_FILENO);
-    try std.posix.dup2(tty_file.handle, std.posix.STDERR_FILENO);
-}
-
 pub fn resetTty(tty: u8) !void {
     if (tty == 0) return error.InvalidTty;
     try activateTty(tty);
