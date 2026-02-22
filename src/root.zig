@@ -75,16 +75,16 @@ pub const ZgsldConfigWriter = struct {
     }
 };
 
-pub const ZgsldVTable = struct {
-    run: *const fn (ctx: GreeterContext) anyerror!void,
-    configure: ?*const fn (ctx: ConfigureContext) anyerror!void = null,
-};
-
 pub const Zgsld = struct {
     allocator: std.mem.Allocator,
-    vtable: ZgsldVTable,
+    vtable: *const VTable,
 
-    pub fn init(allocator: std.mem.Allocator, vtable: ZgsldVTable) Zgsld {
+    pub const VTable = struct {
+        run: *const fn (ctx: GreeterContext) anyerror!void,
+        configure: ?*const fn (ctx: ConfigureContext) anyerror!void = null,
+    };
+
+    pub fn init(allocator: std.mem.Allocator, vtable: *const VTable) Zgsld {
         return .{
             .allocator = allocator,
             .vtable = vtable,
