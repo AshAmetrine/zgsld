@@ -92,7 +92,10 @@ pub const Session = struct {
         if (build_options.x11_support and opts.session_info.session_type == .X11) {
             const setup = x11_setup orelse return error.X11SetupMissing;
             const x_cmd = std.posix.getenv("ZGSLD_X11_CMD") orelse "/bin/X";
-            const vt = opts.envmap.get("XDG_VTNR");
+            const vt = if (opts.envmap.get("XDG_VTNR")) |vt_str|
+                try std.fmt.parseInt(u8, vt_str, 10)
+            else
+                null;
             const launcher_pid = try x11.startXServer(.{
                 .x_cmd = x_cmd,
                 .xauth_path = setup.xauth_path,
