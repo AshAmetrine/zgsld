@@ -52,7 +52,7 @@ pub const ZgsldConfigWriter = struct {
         try self.setOwned(&self.config.greeter_user, &self.owned_greeter_user, user);
     }
 
-    pub fn setVt(self: *ZgsldConfigWriter, vt: u8) void {
+    pub fn setVt(self: *ZgsldConfigWriter, vt: ?u8) void {
         self.config.vt = vt;
     }
 

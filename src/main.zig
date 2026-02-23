@@ -16,6 +16,7 @@ const clap_param_str =
     \\-v, --version             Shows the version of zgsld.
     \\-c, --config <str>        Path to ZGSLD config
     \\--vt <u8>                 Sets the VT number
+    \\--no-vt                   Unset VT and use current controlling TTY
 ;
 
 pub fn main() !void {
@@ -64,7 +65,14 @@ pub fn main() !void {
         else => return err,
     };
 
-    if (res.args.vt) |vt| config.vt = vt;
+    if (res.args.@"no-vt" != 0 and res.args.vt != null) {
+        return error.ConflictingVtArgs;
+    }
+    if (res.args.@"no-vt" != 0) {
+        config.vt = null;
+    } else if (res.args.vt) |vt| {
+        config.vt = vt;
+    }
 
     if (config.greeter_cmd) |cmd| {
         if (cmd.len == 0) return error.NullGreeterCmd;
