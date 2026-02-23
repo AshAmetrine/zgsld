@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) !void {
 
     const service_name = b.option([]const u8, "service-name", "Set PAM service name") orelse "login";
     const greeter_user = b.option([]const u8, "greeter-user", "User that runs the greeter") orelse "greeter";
+    const greeter_service_name = b.option([]const u8, "greeter_service_name", "PAM service used to open a greeter session") orelse service_name;
 
     const x11_enabled = b.option(bool, "x11", "Enable X11 session support") orelse false;
 
@@ -23,6 +24,7 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption([]const u8, "version", version_str);
     build_options.addOption([]const u8, "service_name", service_name);
     build_options.addOption([]const u8, "greeter_user", greeter_user);
+    build_options.addOption([]const u8, "greeter_service_name", greeter_service_name);
     build_options.addOption(?u8, "vt", null);
     build_options.addOption(bool, "x11_support", x11_enabled);
     const build_options_mod = build_options.createModule();

@@ -9,6 +9,7 @@ pub const WorkerProcess = struct {
         worker_path: [:0]const u8,
         service_name: []const u8,
         greeter_user: []const u8,
+        greeter_service_name: []const u8,
         greeter_cmd: []const u8,
         x11_cmd: ?[]const u8,
         vt_opt: ?u8,
@@ -37,12 +38,14 @@ pub const WorkerProcess = struct {
 
         const service_z = try arena_allocator.dupeZ(u8, service_name);
         const user_z = try arena_allocator.dupeZ(u8, greeter_user);
+        const greeter_service_z = try arena_allocator.dupeZ(u8, greeter_service_name);
 
         const argv = [_:null]?[*:0]const u8{
             @ptrCast(worker_path.ptr),
             "--session-worker",
             service_z.ptr,
             user_z.ptr,
+            greeter_service_z.ptr,
         };
 
         const pid = try std.posix.fork();

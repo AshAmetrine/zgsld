@@ -36,6 +36,7 @@ pub const WorkerRuntime = struct {
         if (argv.len < 4) return error.MissingWorkerArgs;
         const service = std.mem.span(argv[2]);
         const greeter_username: [:0]const u8 = std.mem.span(argv[3]);
+        const greeter_service = std.mem.span(argv[4]);
         const greeter_cmd = std.posix.getenv("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
 
         const vt = if (std.posix.getenv("ZGSLD_VTNR")) |vt_str| blk: {
@@ -43,7 +44,7 @@ pub const WorkerRuntime = struct {
         } else null;
 
         var greeter = try Greeter.init(self.allocator, .{
-            .service_name = service,
+            .service_name = greeter_service,
             .username = greeter_username,
         });
         defer greeter.deinit();

@@ -28,6 +28,7 @@ pub const ZgsldConfigWriter = struct {
     allocator: std.mem.Allocator,
     config: *ZgsldConfig,
     owned_service_name: ?[]u8 = null,
+    owned_greeter_service_name: ?[]u8 = null,
     owned_greeter_user: ?[]u8 = null,
     owned_x11_cmd: if (build_options.x11_support) ?[]u8 else void = if (build_options.x11_support) null else {},
 
@@ -38,6 +39,7 @@ pub const ZgsldConfigWriter = struct {
     pub fn deinit(self: *ZgsldConfigWriter) void {
         if (self.owned_service_name) |name| self.allocator.free(name);
         if (self.owned_greeter_user) |user| self.allocator.free(user);
+        if (self.owned_greeter_service_name) |name| self.allocator.free(name);
         if (build_options.x11_support) {
             if (self.owned_x11_cmd) |cmd| self.allocator.free(cmd);
         }
@@ -50,6 +52,10 @@ pub const ZgsldConfigWriter = struct {
 
     pub fn setGreeterUser(self: *ZgsldConfigWriter, user: []const u8) !void {
         try self.setOwned(&self.config.greeter_user, &self.owned_greeter_user, user);
+    }
+
+    pub fn setGreeterServiceName(self: *ZgsldConfigWriter, name: []const u8) !void {
+        try self.setOwned(&self.config.greeter_service_name, &self.owned_greeter_service_name, name);
     }
 
     pub fn setVt(self: *ZgsldConfigWriter, vt: ?u8) void {
@@ -139,7 +145,8 @@ pub const Zgsld = struct {
 
             log.debug("Greeter Path: {s}", .{self_exe_path_z});
             log.debug("Greeter User: {s}", .{zgsld_config.greeter_user});
-            log.debug("Pam Service Name: {s}", .{zgsld_config.service_name});
+            log.debug("PAM Service Name: {s}", .{zgsld_config.service_name});
+            log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter_service_name});
 
             const argv = std.os.argv;
 

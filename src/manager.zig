@@ -43,6 +43,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.self_exe_path,
             opts.config.service_name,
             opts.config.greeter_user,
+            opts.config.greeter_service_name,
             opts.greeter_cmd,
             if (build_options.x11_support) opts.config.x11.cmd else null,
             opts.config.vt,

@@ -26,6 +26,7 @@ fn configType() type {
     const base = [_]Type.StructField{
         field("service_name", []const u8, build_options.service_name),
         field("greeter_user", []const u8, build_options.greeter_user),
+        field("greeter_service_name", []const u8, build_options.greeter_service_name),
         field("vt", ?u8, build_options.vt),
     };
 
