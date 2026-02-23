@@ -12,23 +12,23 @@ const Xauth = struct {
     display_number: []const u8,
     name: []const u8,
     data: []const u8,
+
+    pub fn writeAll(self: Xauth, writer: *std.Io.Writer) !void {
+        try writer.writeInt(u16, @intFromEnum(self.family), .big);
+
+        try writer.writeInt(u16, @intCast(self.address.len), .big);
+        try writer.writeAll(self.address);
+
+        try writer.writeInt(u16, @intCast(self.display_number.len), .big);
+        try writer.writeAll(self.display_number);
+
+        try writer.writeInt(u16, @intCast(self.name.len), .big);
+        try writer.writeAll(self.name);
+
+        try writer.writeInt(u16, @intCast(self.data.len), .big);
+        try writer.writeAll(self.data);
+    }
 };
-
-fn writeXauthRecord(writer: *std.Io.Writer, xauth: Xauth) !void {
-    try writer.writeInt(u16, @intFromEnum(xauth.family), .big);
-
-    try writer.writeInt(u16, @intCast(xauth.address.len), .big);
-    try writer.writeAll(xauth.address);
-
-    try writer.writeInt(u16, @intCast(xauth.display_number.len), .big);
-    try writer.writeAll(xauth.display_number);
-
-    try writer.writeInt(u16, @intCast(xauth.name.len), .big);
-    try writer.writeAll(xauth.name);
-
-    try writer.writeInt(u16, @intCast(xauth.data.len), .big);
-    try writer.writeAll(xauth.data);
-}
 
 fn mcookie() [Md5.digest_length]u8 {
     var buf: [4096]u8 = undefined;
@@ -67,7 +67,8 @@ pub fn createXauthEntry(
     var file_w_buf: [1024]u8 = undefined;
     var writer = xauth_file.file.writer(&file_w_buf);
 
-    try writeXauthRecord(&writer.interface, auth);
+    try auth.writeAll(&writer.interface);
+
     try writer.interface.flush();
     return xauth_file.path;
 }
