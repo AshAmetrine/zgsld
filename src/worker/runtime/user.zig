@@ -15,7 +15,6 @@ pub const UserInfo = struct {
 };
 
 pub fn dropPrivileges(user_info: UserInfo) !void {
-    if (std.posix.geteuid() != 0) return;
     if (comptime builtin.os.tag != .linux and builtin.os.tag != .freebsd) {
         return error.UnsupportedPlatform;
     }
@@ -42,7 +41,6 @@ pub fn ensureDirOwned(
 
     const stat = try std.posix.fstat(dir.fd);
     if (stat.uid != uid or stat.gid != gid) {
-        if (std.posix.geteuid() != 0) return error.PermissionDenied;
         try dir.chown(uid, gid);
     }
     try dir.chmod(mode);

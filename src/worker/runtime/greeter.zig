@@ -42,9 +42,7 @@ pub const Greeter = struct {
     }
 
     pub fn spawn(self: *Greeter, ipc_fd: std.posix.fd_t, greeter_cmd: []const u8) !void {
-        if (std.posix.geteuid() == 0) {
-            try self.pam.openSession(.{});
-        }
+        try self.pam.openSession(.{});
         var envmap = try self.pam.createEnvListMap();
         defer envmap.deinit();
 

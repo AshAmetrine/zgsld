@@ -23,10 +23,7 @@ pub fn applyPamSessionEnv(
     }
 
     try pam.putEnv("XDG_SESSION_CLASS=user");
-
-    if (std.posix.geteuid() == 0) {
-        try pam.openSession(.{});
-    }
+    try pam.openSession(.{});
 
     // Add pam env list to the envmap (overwrites)
     try pam.addEnvListToMap(session_envmap);
