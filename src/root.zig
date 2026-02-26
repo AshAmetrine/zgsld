@@ -12,8 +12,6 @@ pub const logFn = logging.logFn;
 pub const ipc = @import("ipc");
 const Ipc = ipc.Ipc;
 
-pub const ZgsldConfig = @import("config.zig").Config;
-
 pub const Zgsld = struct {
     allocator: std.mem.Allocator,
     vtable: *const VTable,
