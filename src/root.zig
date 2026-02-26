@@ -18,19 +18,29 @@ pub const Zgsld = struct {
 
     pub const Config = @import("Config.zig");
 
+    /// Context passed to `VTable.run`.
     pub const GreeterContext = struct {
+        /// Allocator supplied to `Zgsld.init`.
         allocator: std.mem.Allocator,
+        /// IPC channel to zgsld for IPC communication.
         ipc: *IpcConnection,
     };
 
+    /// Context passed to `VTable.configure` in standalone mode.
     pub const ConfigureContext = struct {
+        /// Allocator supplied to `Zgsld.init` for temporary allocations.
         allocator: std.mem.Allocator,
+        /// zgsld-managed arena for values assigned into `config`.
         arena_allocator: std.mem.Allocator,
+        /// Mutable config initialized from build defaults.
         config: *Config,
     };
 
+    /// Integration callbacks implemented by the greeter.
     pub const VTable = struct {
+        /// Runs the greeter
         run: *const fn (ctx: GreeterContext) anyerror!void,
+        /// Optional standalone hook to override `Config`.
         configure: ?*const fn (ctx: ConfigureContext) anyerror!void = null,
     };
 

@@ -1,7 +1,22 @@
+//! Binary IPC protocol between greeter and zgsld.
+//!
+//! Events are encoded as:
+//! - `u8` event tag
+//! - `u32` payload length (native endianness)
+//! - payload bytes
+//!
+//! Protocol flow:
+//! 1. greeter sends `pam_start_auth`
+//! 2. zgsld sends `pam_message`/`pam_request`
+//! 3. greeter sends `pam_response` for each `pam_request`
+//! 4. zgsld sends `pam_auth_result`
+//! 5. greeter sends `set_session_env` + `start_session`
+
 const std = @import("std");
 const builtin = @import("builtin");
 const native = builtin.target.cpu.arch.endian();
 
+/// Recommended buffer size for event payloads and socket IO.
 pub const event_buf_size = 4096;
 
 const EventType = enum {
@@ -15,38 +30,46 @@ const EventType = enum {
     set_session_env,
 };
 
+/// Session type chosen by the greeter after authentication succeeds.
 pub const SessionType = enum(u8) {
     Command = 0,
     X11 = 1,
 };
 
+/// Payload for `start_session`.
 pub const SessionCommand = struct {
     session_cmd: []const u8,
     source_profile: bool = true,
 };
 
+/// Session launch request sent by the greeter.
 pub const SessionInfo = struct {
     session_type: SessionType,
     command: SessionCommand,
 };
 
+/// Environment variable entry sent by the greeter before `start_session`.
 pub const SessionEnvVar = struct {
     key: []const u8,
     value: []const u8,
 };
 
+/// PAM prompt request sent from zgsld to greeter.
 pub const PamConvRequest = struct {
     echo: bool,
     message: []const u8,
 };
 
+/// Informational/error message sent from zgsld to greeter.
 pub const PamMessage = struct {
     is_error: bool,
     message: []const u8,
 };
 
+/// PAM response string sent from greeter to zgsld.
 pub const PamConvResponse = []const u8;
 
+/// Authentication result sent from zgsld to greeter.
 pub const PamAuthResult = struct {
     ok: bool,
 };
@@ -64,27 +87,33 @@ pub const Event = union(EventType) {
     set_session_env: SessionEnvVar,
 };
 
+/// Socket-backed IPC transport with event encode/decode helpers.
 pub const Connection = struct {
     const Self = @This();
 
     file: std.fs.File,
 
+    /// Initializes a connection from an owned file handle.
     pub fn init(file: std.fs.File) Self {
         return .{ .file = file };
     }
 
+    /// Initializes a connection from an fd.
     pub fn initFromFd(fd: std.posix.fd_t) Self {
         return init(std.fs.File{ .handle = fd });
     }
 
+    /// Closes the underlying socket/file.
     pub fn deinit(self: *Self) void {
         self.file.close();
     }
 
+    /// Creates a buffered file reader using caller-provided buffer.
     pub fn reader(self: *Self, buffer: []u8) std.fs.File.Reader {
         return self.file.reader(buffer);
     }
 
+    /// Creates a buffered file writer using caller-provided buffer.
     pub fn writer(self: *Self, buffer: []u8) std.fs.File.Writer {
         return self.file.writer(buffer);
     }
@@ -104,6 +133,10 @@ pub const Connection = struct {
         try io_writer.writeInt(u32, payload_len, native);
     }
 
+    /// Reads and decodes one event from the stream into `event_buf`.
+    ///
+    /// Returned string/slice fields borrow from `event_buf` and are valid only
+    /// until the next `readEvent` call that reuses that buffer.
     pub fn readEvent(_: *Self, io_reader: *std.Io.Reader, event_buf: []u8) !Event {
         const header = try readHeader(io_reader);
 
@@ -184,6 +217,7 @@ pub const Connection = struct {
         };
     }
 
+    /// Encodes and writes one event to the stream.
     pub fn writeEvent(_: *Self, io_writer: *std.Io.Writer, event: *const Event) !void {
         switch (event.*) {
             .pam_start_auth => |ev| {

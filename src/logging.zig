@@ -1,13 +1,21 @@
+//! Logging helpers used by zgsld and greeter integrations.
+
 const std = @import("std");
 
 var log_fd: ?std.posix.fd_t = null;
 
+/// Reads `ZGSLD_LOG` and sets the output fd used by `logFn`.
+///
+/// Call once near process startup before emitting logs.
 pub fn initZgsldLog() void {
     if (std.posix.getenv("ZGSLD_LOG")) |value| {
         log_fd = std.fmt.parseInt(std.posix.fd_t, value, 10) catch null;
     }
 }
 
+/// Log function for greeters to use the same log output location as zgsld 
+///
+/// `pub const std_options: std.Options = .{ .logFn = zgsld.logFn };`
 pub fn logFn(
     comptime level: std.log.Level,
     comptime scope: @Type(.enum_literal),
