@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const SocketPair = @import("../SocketPair.zig");
 const pam_mod = @import("pam");
 const greeter_mod = @import("runtime/greeter.zig");
 const session_mod = @import("runtime/session.zig");
@@ -49,7 +50,7 @@ pub const WorkerRuntime = struct {
         });
         defer greeter.deinit();
 
-        const fds = try createSocketPair();
+        const fds = try SocketPair.init(true);
         const greeter_pid = blk: {
             defer std.posix.close(fds.child);
             errdefer std.posix.close(fds.parent);
@@ -206,23 +207,6 @@ const SessionEnvKey = enum {
     XDG_CURRENT_DESKTOP,
     XDG_SESSION_TYPE,
 };
-
-const SocketPair = struct {
-    parent: std.posix.fd_t,
-    child: std.posix.fd_t,
-};
-
-fn createSocketPair() !SocketPair {
-    var fds: [2]std.posix.fd_t = undefined;
-    const rc = std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
-    if (rc != 0) return std.posix.unexpectedErrno(std.posix.errno(rc));
-
-    const flags = try std.posix.fcntl(fds[0], std.posix.F.GETFD, 0);
-    _ = try std.posix.fcntl(fds[0], std.posix.F.SETFD, flags |
-        std.posix.FD_CLOEXEC);
-
-    return .{ .parent = fds[0], .child = fds[1] };
-}
 
 // PAM CONV
 

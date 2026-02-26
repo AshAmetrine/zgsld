@@ -3,6 +3,7 @@ const build_options = @import("build_options");
 const logging = @import("logging.zig");
 const session_manager = if (build_options.standalone) @import("manager.zig");
 const worker = if (build_options.standalone) @import("worker.zig");
+const preview = @import("preview.zig");
 
 const log = std.log.scoped(.zgsld);
 
@@ -81,6 +82,20 @@ pub const Zgsld = struct {
             log.err("Is the greeter being run by zgsld?", .{});
             return error.MissingZgsldSock;
         }
+    }
+
+    /// Runs the greeter against a mock IPC daemon.
+    pub fn runPreview(self: Zgsld, opts: preview.Options) !void {
+        var ctx: preview.Runtime.ServerCtx = undefined;
+        var runtime = try preview.Runtime.init(&ctx, opts);
+        defer runtime.deinit();
+
+        try self.vtable.run(.{
+            .allocator = self.allocator,
+            .ipc = &runtime.ipc_conn,
+        });
+
+        try runtime.closeAndJoin();
     }
 
     fn runStandalone(self: Zgsld) !void {
