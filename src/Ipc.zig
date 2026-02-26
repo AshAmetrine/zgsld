@@ -10,9 +10,9 @@ pub const GREETER_BUF_SIZE = 4096;
 // (max_username_len+1)
 pub const PAM_START_BUF_SIZE = 64;
 
-pub const IPC_IO_BUF_SIZE = 4096;
+pub const IO_BUF_SIZE = 4096;
 
-const IpcEventType = enum {
+const EventType = enum {
     pam_start_auth,
     pam_message,
     pam_request,
@@ -47,15 +47,19 @@ pub const PamConvRequest = struct {
     echo: bool,
     message: []const u8,
 };
+
 pub const PamMessage = struct {
     is_error: bool,
     message: []const u8,
 };
+
 pub const PamConvResponse = []const u8;
+
 pub const PamAuthResult = struct {
     ok: bool,
 };
-pub const IpcEvent = union(IpcEventType) {
+
+pub const Event = union(EventType) {
     pam_start_auth: struct {
         user: [:0]const u8,
     },
@@ -68,45 +72,47 @@ pub const IpcEvent = union(IpcEventType) {
     set_session_env: SessionEnvVar,
 };
 
-pub const Ipc = struct {
+pub const Connection = struct {
+    const Self = @This();
+
     file: std.fs.File,
 
-    pub fn init(file: std.fs.File) Ipc {
-        return Ipc{ .file = file };
+    pub fn init(file: std.fs.File) Self {
+        return .{ .file = file };
     }
 
-    pub fn initFromFd(fd: std.posix.fd_t) Ipc {
-        return Ipc.init(std.fs.File{ .handle = fd });
+    pub fn initFromFd(fd: std.posix.fd_t) Self {
+        return init(std.fs.File{ .handle = fd });
     }
 
-    pub fn deinit(self: *Ipc) void {
+    pub fn deinit(self: *Self) void {
         self.file.close();
     }
 
-    pub fn reader(self: *Ipc, buffer: []u8) std.fs.File.Reader {
+    pub fn reader(self: *Self, buffer: []u8) std.fs.File.Reader {
         return self.file.reader(buffer);
     }
 
-    pub fn writer(self: *Ipc, buffer: []u8) std.fs.File.Writer {
+    pub fn writer(self: *Self, buffer: []u8) std.fs.File.Writer {
         return self.file.writer(buffer);
     }
 
-    fn readHeader(io_reader: *std.Io.Reader) !struct { tag: IpcEventType, payload_len: usize } {
+    fn readHeader(io_reader: *std.Io.Reader) !struct { tag: EventType, payload_len: usize } {
         const tag_num = try io_reader.takeInt(u8, native);
         const payload_len_u32 = try io_reader.takeInt(u32, native);
-        const tag: IpcEventType = @enumFromInt(tag_num);
+        const tag: EventType = @enumFromInt(tag_num);
         return .{
             .tag = tag,
             .payload_len = @intCast(payload_len_u32),
         };
     }
 
-    fn writeHeader(io_writer: *std.Io.Writer, tag: IpcEventType, payload_len: u32) !void {
+    fn writeHeader(io_writer: *std.Io.Writer, tag: EventType, payload_len: u32) !void {
         try io_writer.writeInt(u8, @intFromEnum(tag), native);
         try io_writer.writeInt(u32, payload_len, native);
     }
 
-    pub fn readEvent(_: *Ipc, io_reader: *std.Io.Reader, event_buf: []u8) !IpcEvent {
+    pub fn readEvent(_: *Self, io_reader: *std.Io.Reader, event_buf: []u8) !Event {
         const header = try readHeader(io_reader);
 
         const payload_len = header.payload_len;
@@ -120,17 +126,17 @@ pub const Ipc = struct {
         event_buf[payload_len] = 0;
 
         return switch (header.tag) {
-            .pam_start_auth => IpcEvent{
+            .pam_start_auth => Event{
                 .pam_start_auth = .{
                     .user = event_buf[0..payload_len :0],
                 },
             },
-            .login_cancel => IpcEvent.login_cancel,
+            .login_cancel => Event.login_cancel,
             .pam_message => blk: {
                 if (payload_len < 1) return error.InvalidPayload;
                 const is_error = event_buf[0] != 0;
                 const msg = event_buf[1..payload_len];
-                break :blk IpcEvent{
+                break :blk Event{
                     .pam_message = .{
                         .is_error = is_error,
                         .message = msg,
@@ -141,18 +147,18 @@ pub const Ipc = struct {
                 if (payload_len < 1) return error.InvalidPayload;
                 const echo = event_buf[0] != 0;
                 const msg = event_buf[1..payload_len];
-                break :blk IpcEvent{
+                break :blk Event{
                     .pam_request = .{
                         .echo = echo,
                         .message = msg,
                     },
                 };
             },
-            .pam_response => IpcEvent{ .pam_response = event_buf[0..payload_len] },
+            .pam_response => Event{ .pam_response = event_buf[0..payload_len] },
             .pam_auth_result => blk: {
                 if (payload_len != 1) return error.InvalidPayload;
                 const ok = event_buf[0] != 0;
-                break :blk IpcEvent{ .pam_auth_result = .{ .ok = ok } };
+                break :blk Event{ .pam_auth_result = .{ .ok = ok } };
             },
             .start_session => blk: {
                 if (payload_len < 3) return error.InvalidPayload;
@@ -162,7 +168,7 @@ pub const Ipc = struct {
                 if (session_cmd.len == 0) return error.InvalidPayload;
 
                 const source_profile = (flags & 0x01) != 0;
-                break :blk IpcEvent{
+                break :blk Event{
                     .start_session = .{
                         .session_type = session_type,
                         .command = .{
@@ -176,7 +182,7 @@ pub const Ipc = struct {
                 const env_bytes = event_buf[0..payload_len];
                 const eq = std.mem.indexOfScalar(u8, env_bytes, '=') orelse return error.InvalidPayload;
                 if (eq == 0) return error.InvalidPayload;
-                break :blk IpcEvent{
+                break :blk Event{
                     .set_session_env = .{
                         .key = env_bytes[0..eq],
                         .value = env_bytes[eq + 1 .. payload_len],
@@ -186,7 +192,7 @@ pub const Ipc = struct {
         };
     }
 
-    pub fn writeEvent(_: *Ipc, io_writer: *std.Io.Writer, event: *const IpcEvent) !void {
+    pub fn writeEvent(_: *Self, io_writer: *std.Io.Writer, event: *const Event) !void {
         switch (event.*) {
             .pam_start_auth => |ev| {
                 const user_len: u32 = @intCast(ev.user.len);

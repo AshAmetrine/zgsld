@@ -1,5 +1,5 @@
 const std = @import("std");
-const zgipc = @import("ipc");
+const Ipc = @import("Ipc");
 const pam_mod = @import("pam");
 const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
@@ -55,7 +55,7 @@ pub const Greeter = struct {
         const log_fd_str = try std.fmt.bufPrintZ(&log_fd_buf, "{d}", .{log_fd});
         try envmap.put("ZGSLD_LOG", log_fd_str);
 
-        const session_info: zgipc.SessionInfo = .{
+        const session_info: Ipc.SessionInfo = .{
             .session_type = .Command,
             .command = .{
                 .session_cmd = greeter_cmd,

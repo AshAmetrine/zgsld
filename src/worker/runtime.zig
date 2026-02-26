@@ -1,5 +1,5 @@
 const std = @import("std");
-const zgipc = @import("ipc");
+const Ipc = @import("Ipc");
 const pam_mod = @import("pam");
 const greeter_mod = @import("runtime/greeter.zig");
 const session_mod = @import("runtime/session.zig");
@@ -62,7 +62,7 @@ pub const WorkerRuntime = struct {
             forwardShutdownSignal(shutdown_signal.load(.seq_cst));
         }
 
-        var ipc_conn = zgipc.Ipc.initFromFd(fds.parent);
+        var ipc_conn = Ipc.Connection.initFromFd(fds.parent);
         defer ipc_conn.deinit();
 
         try self.runIpcLoop(.{
@@ -75,15 +75,15 @@ pub const WorkerRuntime = struct {
 
     const RunOpts = struct {
         service_name: []const u8,
-        ipc_conn: *zgipc.Ipc,
+        ipc_conn: *Ipc.Connection,
         greeter_pid: std.posix.pid_t,
         vt: ?u8,
     };
 
     fn runIpcLoop(self: *WorkerRuntime, opts: RunOpts) !void {
-        var event_buf: [zgipc.GREETER_BUF_SIZE]u8 = undefined;
-        var rbuf: [zgipc.IPC_IO_BUF_SIZE]u8 = undefined;
-        var wbuf: [zgipc.IPC_IO_BUF_SIZE]u8 = undefined;
+        var event_buf: [Ipc.GREETER_BUF_SIZE]u8 = undefined;
+        var rbuf: [Ipc.IO_BUF_SIZE]u8 = undefined;
+        var wbuf: [Ipc.IO_BUF_SIZE]u8 = undefined;
         var saw_auth = false;
 
         var reader = opts.ipc_conn.reader(&rbuf);
@@ -133,7 +133,7 @@ pub const WorkerRuntime = struct {
                             continue;
                         }
 
-                        const fail = zgipc.IpcEvent{ .pam_auth_result = .{ .ok = false } };
+                        const fail = Ipc.Event{ .pam_auth_result = .{ .ok = false } };
                         opts.ipc_conn.writeEvent(ipc_writer, &fail) catch {};
                         ipc_writer.flush() catch {};
                         continue;
@@ -141,7 +141,7 @@ pub const WorkerRuntime = struct {
                     try pam.accountMgmt(.{});
                     try pam.setCred(.{ .action = .establish });
 
-                    const ok = zgipc.IpcEvent{ .pam_auth_result = .{ .ok = true } };
+                    const ok = Ipc.Event{ .pam_auth_result = .{ .ok = true } };
                     try opts.ipc_conn.writeEvent(ipc_writer, &ok);
                     try ipc_writer.flush();
 
@@ -228,7 +228,7 @@ fn createSocketPair() !SocketPair {
 
 pub const PamCtx = struct {
     cancelled: bool,
-    ipc_conn: *zgipc.Ipc,
+    ipc_conn: *Ipc.Connection,
     reader: *std.Io.Reader,
     writer: *std.Io.Writer,
 };
@@ -243,7 +243,7 @@ fn loginConv(
     const ipc_reader = ctx.reader;
     const ipc_writer = ctx.writer;
 
-    var ipc_buf: [zgipc.PAM_CONV_BUF_SIZE]u8 = undefined;
+    var ipc_buf: [Ipc.PAM_CONV_BUF_SIZE]u8 = undefined;
     defer std.crypto.secureZero(u8, &ipc_buf);
 
     var iter = msgs.iter();
@@ -286,7 +286,7 @@ fn loginConv(
 fn startSession(
     allocator: std.mem.Allocator,
     user: [:0]const u8,
-    info: zgipc.SessionInfo,
+    info: Ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.EnvMap,
     vt: ?u8,

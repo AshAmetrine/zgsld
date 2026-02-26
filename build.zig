@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) !void {
 
     const pam = b.dependency("pam", .{ .target = target, .optimize = optimize });
     const ipc_mod = b.createModule(.{
-        .root_source_file = b.path("src/ipc.zig"),
+        .root_source_file = b.path("src/Ipc.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "build_options", .module = build_options_mod },
-            .{ .name = "ipc", .module = ipc_mod },
+            .{ .name = "Ipc", .module = ipc_mod },
             .{ .name = "pam", .module = pam.module("pam") },
         },
     });
@@ -81,7 +81,7 @@ pub fn build(b: *std.Build) !void {
                 .imports = &.{
                     .{ .name = "build_options", .module = build_options_mod },
                     .{ .name = "clap", .module = clap.module("clap") },
-                    .{ .name = "ipc", .module = ipc_mod },
+                    .{ .name = "Ipc", .module = ipc_mod },
                     .{ .name = "zigini", .module = zigini.module("zigini") },
                     .{ .name = "pam", .module = pam.module("pam") },
                 },

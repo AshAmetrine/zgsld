@@ -1,5 +1,5 @@
 const std = @import("std");
-const zgipc = @import("ipc");
+const Ipc = @import("Ipc");
 const tty = @import("tty.zig");
 const build_options = @import("build_options");
 const x11 = if (build_options.x11_support) @import("session/x11.zig");
@@ -51,7 +51,7 @@ pub const Session = struct {
     }
 
     const SpawnOpts = struct {
-        session_info: zgipc.SessionInfo,
+        session_info: Ipc.SessionInfo,
         envmap: *std.process.EnvMap,
         user_info: UserInfo,
     };
@@ -146,7 +146,7 @@ pub const Session = struct {
     }
 
     const SessionCommandOpts = struct {
-        cmd: zgipc.SessionCommand,
+        cmd: Ipc.SessionCommand,
         user_info: UserInfo,
         environ: [:null]const ?[*:0]const u8,
     };

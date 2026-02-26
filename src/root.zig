@@ -9,8 +9,8 @@ const log = std.log.scoped(.zgsld);
 pub const initZgsldLog = logging.initZgsldLog;
 pub const logFn = logging.logFn;
 
-pub const ipc = @import("ipc");
-const Ipc = ipc.Ipc;
+pub const Ipc = @import("Ipc");
+const IpcConnection = Ipc.Connection;
 
 pub const Zgsld = struct {
     allocator: std.mem.Allocator,
@@ -20,7 +20,7 @@ pub const Zgsld = struct {
 
     pub const GreeterContext = struct {
         allocator: std.mem.Allocator,
-        ipc: *Ipc,
+        ipc: *IpcConnection,
     };
 
     pub const ConfigureContext = struct {
@@ -54,7 +54,7 @@ pub const Zgsld = struct {
         }
 
         if (sock_fd) |fd| {
-            var ipc_conn = Ipc.initFromFd(fd);
+            var ipc_conn = IpcConnection.initFromFd(fd);
             defer ipc_conn.deinit();
 
             try self.vtable.run(.{
