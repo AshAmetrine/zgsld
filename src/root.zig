@@ -16,7 +16,7 @@ pub const Zgsld = struct {
     allocator: std.mem.Allocator,
     vtable: *const VTable,
 
-    pub const Config = @import("config.zig").Config;
+    pub const Config = @import("Config.zig");
 
     pub const GreeterContext = struct {
         allocator: std.mem.Allocator,
@@ -77,7 +77,7 @@ pub const Zgsld = struct {
         if (build_options.standalone) {
             const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
 
-            var zgsld_config = Zgsld.Config{};
+            var zgsld_config = Config{};
             var configure_arena = std.heap.ArenaAllocator.init(self.allocator);
             defer configure_arena.deinit();
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const session_manager = @import("manager.zig");
 const worker = @import("worker.zig");
-const ZgsldConfig = @import("config.zig").Config;
+const Config = @import("Config.zig");
 
 const clap = @import("clap");
 const zigini = @import("zigini");
@@ -53,14 +53,14 @@ pub fn main() !void {
         std.process.exit(0);
     }
 
-    var conf_ini = zigini.Ini(ZgsldConfig).init(allocator);
+    var conf_ini = zigini.Ini(Config).init(allocator);
     defer conf_ini.deinit();
 
     const config_path = res.args.config orelse "/etc/zgsld/zgsld.ini";
     var config = conf_ini.readFileToStruct(config_path, .{}) catch |err| switch (err) {
         error.FileNotFound => blk: {
             log.debug("No Config File Found", .{});
-            break :blk ZgsldConfig{};
+            break :blk Config{};
         },
         else => return err,
     };

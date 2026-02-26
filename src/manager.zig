@@ -2,7 +2,7 @@ const std = @import("std");
 const vt = @import("vt.zig");
 const worker = @import("worker.zig");
 const log = std.log.scoped(.zgsld);
-const ZgsldConfig = @import("config.zig").Config;
+const Config = @import("Config.zig");
 const build_options = @import("build_options");
 
 var active_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
@@ -11,7 +11,7 @@ var shutdown_requested = std.atomic.Value(u8).init(0);
 pub const SessionManagerRunOpts = struct {
     self_exe_path: [:0]const u8,
     greeter_cmd: []const u8,
-    config: ZgsldConfig,
+    config: Config,
 };
 
 pub fn run(opts: SessionManagerRunOpts) !void {
