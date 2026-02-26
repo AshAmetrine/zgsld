@@ -14,75 +14,22 @@ const Ipc = ipc.Ipc;
 
 pub const ZgsldConfig = @import("config.zig").Config;
 
-pub const GreeterContext = struct {
-    allocator: std.mem.Allocator,
-    ipc: *Ipc,
-};
-
-pub const ConfigureContext = struct {
-    allocator: std.mem.Allocator,
-    cfg: *ZgsldConfigWriter,
-};
-
-pub const ZgsldConfigWriter = struct {
-    allocator: std.mem.Allocator,
-    config: *ZgsldConfig,
-    owned_service_name: ?[]u8 = null,
-    owned_greeter_service_name: ?[]u8 = null,
-    owned_greeter_user: ?[]u8 = null,
-    owned_x11_cmd: if (build_options.x11_support) ?[]u8 else void = if (build_options.x11_support) null else {},
-
-    pub fn init(allocator: std.mem.Allocator, config: *ZgsldConfig) ZgsldConfigWriter {
-        return .{ .allocator = allocator, .config = config };
-    }
-
-    pub fn deinit(self: *ZgsldConfigWriter) void {
-        if (self.owned_service_name) |name| self.allocator.free(name);
-        if (self.owned_greeter_user) |user| self.allocator.free(user);
-        if (self.owned_greeter_service_name) |name| self.allocator.free(name);
-        if (build_options.x11_support) {
-            if (self.owned_x11_cmd) |cmd| self.allocator.free(cmd);
-        }
-        self.* = undefined;
-    }
-
-    pub fn setServiceName(self: *ZgsldConfigWriter, name: []const u8) !void {
-        try self.setOwned(&self.config.service_name, &self.owned_service_name, name);
-    }
-
-    pub fn setGreeterUser(self: *ZgsldConfigWriter, user: []const u8) !void {
-        try self.setOwned(&self.config.greeter_user, &self.owned_greeter_user, user);
-    }
-
-    pub fn setGreeterServiceName(self: *ZgsldConfigWriter, name: []const u8) !void {
-        try self.setOwned(&self.config.greeter_service_name, &self.owned_greeter_service_name, name);
-    }
-
-    pub fn setVt(self: *ZgsldConfigWriter, vt: ?u8) void {
-        self.config.vt = vt;
-    }
-
-    pub fn setX11Command(self: *ZgsldConfigWriter, cmd: []const u8) !void {
-        if (!build_options.x11_support) unreachable;
-        try self.setOwned(&self.config.x11.cmd, &self.owned_x11_cmd, cmd);
-    }
-
-    fn setOwned(
-        self: *ZgsldConfigWriter,
-        target: *[]const u8,
-        owned: *?[]u8,
-        value: []const u8,
-    ) !void {
-        const copy = try self.allocator.dupe(u8, value);
-        if (owned.*) |prev| self.allocator.free(prev);
-        owned.* = copy;
-        target.* = copy;
-    }
-};
-
 pub const Zgsld = struct {
     allocator: std.mem.Allocator,
     vtable: *const VTable,
+
+    pub const Config = @import("config.zig").Config;
+
+    pub const GreeterContext = struct {
+        allocator: std.mem.Allocator,
+        ipc: *Ipc,
+    };
+
+    pub const ConfigureContext = struct {
+        allocator: std.mem.Allocator,
+        arena_allocator: std.mem.Allocator,
+        config: *Config,
+    };
 
     pub const VTable = struct {
         run: *const fn (ctx: GreeterContext) anyerror!void,
@@ -132,14 +79,15 @@ pub const Zgsld = struct {
         if (build_options.standalone) {
             const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
 
-            var zgsld_config = ZgsldConfig{};
-            var writer = ZgsldConfigWriter.init(self.allocator, &zgsld_config);
-            defer writer.deinit();
+            var zgsld_config = Zgsld.Config{};
+            var configure_arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer configure_arena.deinit();
 
             if (self.vtable.configure) |configure| {
                 try configure(.{
                     .allocator = self.allocator,
-                    .cfg = &writer,
+                    .arena_allocator = configure_arena.allocator(),
+                    .config = &zgsld_config,
                 });
             }
 
