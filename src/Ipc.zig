@@ -2,15 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const native = builtin.target.cpu.arch.endian();
 
-// buffer size to read greeter responses in pam conv
-pub const PAM_CONV_BUF_SIZE = 4096;
-// buffer size to read ipc events in the greeter
-pub const GREETER_BUF_SIZE = 4096;
-// buffer size to read start_auth event
-// (max_username_len+1)
-pub const PAM_START_BUF_SIZE = 64;
-
-pub const IO_BUF_SIZE = 4096;
+pub const event_buf_size = 4096;
 
 const EventType = enum {
     pam_start_auth,

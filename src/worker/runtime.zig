@@ -81,9 +81,9 @@ pub const WorkerRuntime = struct {
     };
 
     fn runIpcLoop(self: *WorkerRuntime, opts: RunOpts) !void {
-        var event_buf: [Ipc.GREETER_BUF_SIZE]u8 = undefined;
-        var rbuf: [Ipc.IO_BUF_SIZE]u8 = undefined;
-        var wbuf: [Ipc.IO_BUF_SIZE]u8 = undefined;
+        var event_buf: [Ipc.event_buf_size]u8 = undefined;
+        var rbuf: [Ipc.event_buf_size]u8 = undefined;
+        var wbuf: [Ipc.event_buf_size]u8 = undefined;
         var saw_auth = false;
 
         var reader = opts.ipc_conn.reader(&rbuf);
@@ -243,7 +243,7 @@ fn loginConv(
     const ipc_reader = ctx.reader;
     const ipc_writer = ctx.writer;
 
-    var ipc_buf: [Ipc.PAM_CONV_BUF_SIZE]u8 = undefined;
+    var ipc_buf: [Ipc.event_buf_size]u8 = undefined;
     defer std.crypto.secureZero(u8, &ipc_buf);
 
     var iter = msgs.iter();
