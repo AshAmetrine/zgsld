@@ -1,7 +1,7 @@
 const build_options = @import("build_options");
 
 const X11Config = struct {
-    cmd: []const u8 = "/bin/X",
+    cmd: []const u8 = build_options.x11_cmd,
 };
 
 service_name: []const u8 = build_options.service_name,
