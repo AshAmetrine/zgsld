@@ -6,6 +6,16 @@ ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greet
 
 
 
+## API Documentation
+
+Generate docs locally:
+
+```sh
+zig build docs
+```
+
+Generated files are written to `zig-out/docs`.
+
 ## Configuration
 
 An example configuration is in `res/zgsld.ini`.
