@@ -1,6 +1,6 @@
 const std = @import("std");
 const build_options = @import("build_options");
-pub const logging = @import("logging.zig");
+const logging = @import("logging.zig");
 const session_manager = if (build_options.standalone) @import("manager.zig");
 const worker = if (build_options.standalone) @import("worker.zig");
 
