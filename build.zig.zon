@@ -17,8 +17,8 @@
         },
 
         .zigini = .{
-            .url = "git+https://github.com/Kawaii-Ash/zigini#737c1131dcdc778a964536f6ee7b368304cdb2df",
-            .hash = "zigini-0.3.2-BSkB7UVDAADbz1WyGY1dV6hd7FhCKKD51N5uTxu-tjcq",
+            .url = "git+https://github.com/Kawaii-Ash/zigini#831f6aff55703b7fa34b43c972d60eb3d5d6f4a4",
+            .hash = "zigini-0.3.2-BSkB7UVDAAAErcEC6s7zF9bKTe7CjdBgrV35K3DGHpbr",
             .lazy = true,
         },
     },
