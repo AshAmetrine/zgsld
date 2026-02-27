@@ -17,6 +17,30 @@ var active_child_pid = std.atomic.Value(std.posix.pid_t).init(0);
 const Greeter = greeter_mod.Greeter;
 const Session = session_mod.Session;
 
+const SessionEnvKey = enum {
+    PATH,
+    XDG_SESSION_DESKTOP,
+    XDG_CURRENT_DESKTOP,
+    XDG_SESSION_TYPE,
+};
+
+fn startSession(
+    allocator: std.mem.Allocator,
+    user: [:0]const u8,
+    info: Ipc.SessionInfo,
+    pam: *Pam(PamCtx),
+    session_envmap: *std.process.EnvMap,
+    vt: ?u8,
+) !Session {
+    try env_mod.applyPamSessionEnv(pam, session_envmap, vt);
+    const user_info = try env_mod.applyUserEnv(session_envmap, user);
+    return Session.spawn(allocator, .{
+        .session_info = info,
+        .envmap = session_envmap,
+        .user_info = user_info,
+    });
+}
+
 pub const WorkerRuntimeOpts = struct {
     allocator: std.mem.Allocator,
 };
@@ -201,13 +225,6 @@ pub const WorkerRuntime = struct {
     }
 };
 
-const SessionEnvKey = enum {
-    PATH,
-    XDG_SESSION_DESKTOP,
-    XDG_CURRENT_DESKTOP,
-    XDG_SESSION_TYPE,
-};
-
 // PAM CONV
 
 pub const PamCtx = struct {
@@ -267,22 +284,7 @@ fn loginConv(
     }
 }
 
-fn startSession(
-    allocator: std.mem.Allocator,
-    user: [:0]const u8,
-    info: Ipc.SessionInfo,
-    pam: *Pam(PamCtx),
-    session_envmap: *std.process.EnvMap,
-    vt: ?u8,
-) !Session {
-    try env_mod.applyPamSessionEnv(pam, session_envmap, vt);
-    const user_info = try env_mod.applyUserEnv(session_envmap, user);
-    return Session.spawn(allocator, .{
-        .session_info = info,
-        .envmap = session_envmap,
-        .user_info = user_info,
-    });
-}
+
 
 // Signal Handling
 
