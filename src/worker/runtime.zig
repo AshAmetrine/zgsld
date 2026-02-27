@@ -58,7 +58,7 @@ pub const WorkerRuntime = struct {
         installSignalHandlers();
 
         const argv = std.os.argv;
-        if (argv.len < 4) return error.MissingWorkerArgs;
+        if (argv.len < 5) return error.MissingWorkerArgs;
         const service = std.mem.span(argv[2]);
         const greeter_username: [:0]const u8 = std.mem.span(argv[3]);
         const greeter_service = std.mem.span(argv[4]);

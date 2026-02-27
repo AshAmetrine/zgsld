@@ -183,9 +183,7 @@ fn startCommandSession(
 
         utils.dropPrivileges(user_info) catch std.process.exit(1);
         if (home_dir) |dir| {
-            std.posix.chdir(dir) catch {
-                std.posix.chdir("/") catch std.process.exit(1);
-            };
+            std.posix.chdir(dir) catch std.process.exit(1);
         } else {
             std.posix.chdir("/") catch std.process.exit(1);
         }
