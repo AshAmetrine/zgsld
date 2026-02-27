@@ -49,6 +49,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.config.vt,
         );
         active_worker_pid.store(worker_proc.pid, .seq_cst);
+        defer active_worker_pid.store(0, .seq_cst);
         if (shutdown_requested.load(.seq_cst) != 0) {
             std.posix.kill(worker_proc.pid, std.posix.SIG.TERM) catch {};
         }

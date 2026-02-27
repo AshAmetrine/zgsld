@@ -51,6 +51,7 @@ pub const Greeter = struct {
         try envmap.put("ZGSLD_SOCK", zgsld_sock);
 
         const log_fd = try std.posix.dup(std.posix.STDERR_FILENO);
+        defer std.posix.close(log_fd);
         var log_fd_buf: [16]u8 = undefined;
         const log_fd_str = try std.fmt.bufPrintZ(&log_fd_buf, "{d}", .{log_fd});
         try envmap.put("ZGSLD_LOG", log_fd_str);
