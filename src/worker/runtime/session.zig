@@ -123,6 +123,7 @@ pub const Session = struct {
                 .cmd = opts.session_info.command,
                 .environ = session_environ,
                 .user_info = opts.user_info,
+                .home_dir = opts.envmap.get("HOME"),
             });
 
             return .{
@@ -141,6 +142,7 @@ pub const Session = struct {
             .cmd = opts.session_info.command,
             .environ = session_environ,
             .user_info = opts.user_info,
+            .home_dir = opts.envmap.get("HOME"),
         });
         return .{ .pid = session_pid };
     }
@@ -148,6 +150,7 @@ pub const Session = struct {
     const SessionCommandOpts = struct {
         cmd: Ipc.SessionCommand,
         user_info: UserInfo,
+        home_dir: ?[]const u8,
         environ: [:null]const ?[*:0]const u8,
     };
 
@@ -161,12 +164,13 @@ pub const Session = struct {
 
         const wrapper = [_]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
 
-        return try startCommandSession(opts.user_info, &wrapper, opts.environ);
+        return try startCommandSession(opts.user_info, opts.home_dir, &wrapper, opts.environ);
     }
 };
 
 fn startCommandSession(
     user_info: UserInfo,
+    home_dir: ?[]const u8,
     argv: []const ?[*:0]const u8,
     session_environ: [:null]const ?[*:0]const u8,
 ) !std.posix.pid_t {
@@ -178,6 +182,13 @@ fn startCommandSession(
         };
 
         utils.dropPrivileges(user_info) catch std.process.exit(1);
+        if (home_dir) |dir| {
+            std.posix.chdir(dir) catch {
+                std.posix.chdir("/") catch std.process.exit(1);
+            };
+        } else {
+            std.posix.chdir("/") catch std.process.exit(1);
+        }
 
         const cmd_path = argv[0] orelse std.process.exit(1);
         const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(argv.ptr);

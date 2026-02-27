@@ -36,7 +36,6 @@ pub fn applyUserEnv(session_envmap: *std.process.EnvMap, user: [:0]const u8) !Us
         const s = std.mem.span(home_dir);
         try session_envmap.put("HOME", s);
         try session_envmap.put("PWD", s);
-        std.posix.chdir(s) catch {};
     }
 
     try session_envmap.put("USER", user);
