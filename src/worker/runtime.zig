@@ -187,7 +187,8 @@ pub const WorkerRuntime = struct {
                                 break;
                             },
                             .set_session_env => |env| {
-                                if (std.meta.stringToEnum(SessionEnvKey, env.key) == null) break;
+                                // Ignore unexpected env vars
+                                if (std.meta.stringToEnum(SessionEnvKey, env.key) == null) continue;
                                 try session_envmap.put(env.key, env.value);
                             },
                             .start_session => |info| {
