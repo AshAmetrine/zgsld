@@ -13,6 +13,22 @@ pub const logFn = logging.logFn;
 pub const Ipc = @import("Ipc");
 const IpcConnection = Ipc.Connection;
 
+fn appendShellQuotedArg(
+    buf: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    arg: []const u8,
+) !void {
+    try buf.append(allocator, '\'');
+    for (arg) |ch| {
+        if (ch == '\'') {
+            try buf.appendSlice(allocator, "'\"'\"'");
+        } else {
+            try buf.append(allocator, ch);
+        }
+    }
+    try buf.append(allocator, '\'');
+}
+
 pub const Zgsld = struct {
     allocator: std.mem.Allocator,
     vtable: *const VTable,
@@ -120,30 +136,18 @@ pub const Zgsld = struct {
             log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter_service_name});
 
             const argv = std.os.argv;
+            var cmd_buf: std.ArrayList(u8) = .empty;
+            defer cmd_buf.deinit(self.allocator);
 
-            var total: usize = 0;
-            for (argv) |arg| {
-                total += std.mem.span(arg).len;
-            }
-
-            if (argv.len > 1) {
-                total += argv.len - 1;
-            }
-
-            var buf = try self.allocator.alloc(u8, total);
-            defer self.allocator.free(buf);
-
-            var idx: usize = 0;
             for (argv, 0..) |arg, i| {
                 if (i != 0) {
-                    buf[idx] = ' ';
-                    idx += 1;
+                    try cmd_buf.append(self.allocator, ' ');
                 }
-                const s = std.mem.span(arg);
-                @memcpy(buf[idx .. idx + s.len], s);
-                idx += s.len;
+                try appendShellQuotedArg(&cmd_buf, self.allocator, std.mem.span(arg));
             }
-            const greeter_cmd: []const u8 = buf[0..idx];
+            const greeter_cmd = cmd_buf.items;
+
+            log.debug("Greeter Cmd: {s}", .{greeter_cmd});
 
             try session_manager.run(.{
                 .self_exe_path = self_exe_path_z,
