@@ -12,9 +12,30 @@ const XServerOpts = struct {
     user: ?UserInfo,
 };
 
-pub fn startXServer(opts: XServerOpts) !std.posix.pid_t {
-    // Starting X server:
-    // x_cmd -auth {s} {display_name} {vt}
+pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.pid_t {
+    var display_buf: [16]u8 = undefined;
+    const display_name = try std.fmt.bufPrint(&display_buf, ":{d}", .{opts.display});
+
+    var vt_suffix_buf: [8]u8 = undefined;
+    const vt_suffix: []const u8 = if (opts.vt) |vt_num|
+        try std.fmt.bufPrint(&vt_suffix_buf, " vt{d}", .{vt_num})
+    else
+        "";
+
+    const shell_cmd_z = try std.fmt.allocPrintSentinel(allocator, "exec {s} -auth {s} {s}{s}", .{
+        opts.x_cmd,
+        opts.xauth_path,
+        display_name,
+        vt_suffix,
+    }, 0);
+    defer allocator.free(shell_cmd_z);
+
+    const argv = [_:null]?[*:0]const u8{
+        "/bin/sh",
+        "-c",
+        shell_cmd_z.ptr,
+        null,
+    };
 
     const pid = try std.posix.fork();
     if (pid == 0) {
@@ -22,29 +43,7 @@ pub fn startXServer(opts: XServerOpts) !std.posix.pid_t {
             utils.dropPrivileges(u) catch std.process.exit(1);
         }
 
-        var display_buf: [16]u8 = undefined;
-        const display_name = std.fmt.bufPrintZ(&display_buf, ":{d}", .{opts.display}) catch {
-            std.process.exit(1);
-        };
-
-        var vt_buf: [8]u8 = undefined;
-        const vt_arg: ?[*:0]const u8 = if (opts.vt) |vt_num| blk: {
-            break :blk std.fmt.bufPrintZ(&vt_buf, "vt{d}", .{vt_num}) catch {
-                std.process.exit(1);
-            };
-        } else null;
-
-        const args = [_:null]?[*:0]const u8{
-            opts.x_cmd,
-            "-auth",
-            opts.xauth_path,
-            display_name,
-            vt_arg,
-            null,
-        };
-
-        const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(&args);
-        std.posix.execvpeZ(opts.x_cmd, argv_ptr, std.c.environ) catch {};
+        std.posix.execvpeZ("/bin/sh", &argv, std.c.environ) catch {};
         std.process.exit(1);
     }
 

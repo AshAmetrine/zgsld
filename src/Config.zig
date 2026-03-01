@@ -8,6 +8,7 @@ const build_options = @import("build_options");
 const Ipc = @import("Ipc");
 
 const X11Config = struct {
+    /// X server command, optionally with args.
     cmd: []const u8 = build_options.x11_cmd,
 };
 

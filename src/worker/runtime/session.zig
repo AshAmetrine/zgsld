@@ -96,7 +96,7 @@ pub const Session = struct {
                 try std.fmt.parseInt(u8, vt_str, 10)
             else
                 null;
-            const launcher_pid = try x11.startXServer(.{
+            const launcher_pid = try x11.startXServer(allocator, .{
                 .x_cmd = x_cmd,
                 .xauth_path = setup.xauth_path,
                 .display = setup.display,
@@ -162,7 +162,7 @@ pub const Session = struct {
         const shell_cmd = try std.mem.concatWithSentinel(allocator, u8, &.{ prefix, opts.cmd.session_cmd }, 0);
         defer allocator.free(shell_cmd);
 
-        const wrapper = [_]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
+        const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
 
         return try startCommandSession(opts.user_info, opts.home_dir, &wrapper, opts.environ);
     }
@@ -171,7 +171,7 @@ pub const Session = struct {
 fn startCommandSession(
     user_info: UserInfo,
     home_dir: ?[]const u8,
-    argv: []const ?[*:0]const u8,
+    argv: [:null]const ?[*:0]const u8,
     session_environ: [:null]const ?[*:0]const u8,
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
@@ -189,8 +189,7 @@ fn startCommandSession(
         }
 
         const cmd_path = argv[0] orelse std.process.exit(1);
-        const argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(argv.ptr);
-        std.posix.execvpeZ(cmd_path, argv_ptr, session_environ) catch {};
+        std.posix.execvpeZ(cmd_path, argv, session_environ) catch {};
         std.process.exit(1);
     }
 
