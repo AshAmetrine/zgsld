@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption([]const u8, "x11_cmd", x11_cmd);
     const build_options_mod = build_options.createModule();
 
-    const pam = b.dependency("pam", .{ .target = target, .optimize = optimize });
+    const pam = b.dependency("zig_pam", .{ .target = target, .optimize = optimize });
     const ipc_mod = b.createModule(.{
         .root_source_file = b.path("src/Ipc.zig"),
         .target = target,
@@ -70,29 +70,28 @@ pub fn build(b: *std.Build) !void {
     const fmt_cmd = b.addFmt(.{ .paths = &.{ "build.zig", "build.zig.zon", "src" } });
     fmt_step.dependOn(&fmt_cmd.step);
 
-    if (b.pkg_hash.len == 0) {
-        const clap = b.lazyDependency("clap", .{ .target = target, .optimize = optimize }) orelse return;
-        const zigini = b.lazyDependency("zigini", .{ .target = target, .optimize = optimize }) orelse return;
+    // CLI deps
+    const clap = b.dependency("clap", .{ .target = target, .optimize = optimize });
+    const zigini = b.dependency("zigini", .{ .target = target, .optimize = optimize });
 
-        const exe = b.addExecutable(.{
-            .name = "zgsld",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "build_options", .module = build_options_mod },
-                    .{ .name = "clap", .module = clap.module("clap") },
-                    .{ .name = "Ipc", .module = ipc_mod },
-                    .{ .name = "zigini", .module = zigini.module("zigini") },
-                    .{ .name = "pam", .module = pam.module("pam") },
-                },
-                .link_libc = true,
-            }),
-        });
+    const exe = b.addExecutable(.{
+        .name = "zgsld",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "build_options", .module = build_options_mod },
+                .{ .name = "clap", .module = clap.module("clap") },
+                .{ .name = "Ipc", .module = ipc_mod },
+                .{ .name = "zigini", .module = zigini.module("zigini") },
+                .{ .name = "pam", .module = pam.module("pam") },
+            },
+            .link_libc = true,
+        }),
+    });
 
-        b.installArtifact(exe);
-    }
+    b.installArtifact(exe);
 }
 
 fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) ![]const u8 {
