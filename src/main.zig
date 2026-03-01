@@ -74,7 +74,7 @@ pub fn main() !void {
         config.vt = vt;
     }
 
-    if (config.greeter_cmd) |cmd| {
+    if (config.greeter.command) |cmd| {
         if (cmd.len == 0) return error.NullGreeterCmd;
 
         const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);

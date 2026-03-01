@@ -12,8 +12,8 @@ pub const WorkerProcess = struct {
         greeter: struct {
             user: []const u8,
             service_name: []const u8,
-            cmd: []const u8,
             session_type: Ipc.SessionType,
+            command: []const u8,
         },
         x11_cmd: ?[]const u8,
         vt: ?u8,
@@ -42,7 +42,7 @@ pub const WorkerProcess = struct {
             "ZGSLD_GREETER_SESSION_TYPE",
             @tagName(opts.greeter.session_type),
         );
-        try worker_envmap.put("ZGSLD_GREETER_CMD", opts.greeter.cmd);
+        try worker_envmap.put("ZGSLD_GREETER_CMD", opts.greeter.command);
 
         const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
 

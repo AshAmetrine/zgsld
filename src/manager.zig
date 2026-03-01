@@ -17,7 +17,7 @@ pub const SessionManagerRunOpts = struct {
 pub fn run(opts: SessionManagerRunOpts) !void {
     installSignalHandlers();
 
-    if (!build_options.x11_support and opts.config.greeter_session_type == .x11) {
+    if (!build_options.x11_support and opts.config.greeter.session_type == .x11) {
         log.err("Greeter X11 session type requested, but zgsld was built without -Dx11 support", .{});
         return error.X11UnsupportedBuild;
     }
@@ -29,8 +29,8 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         };
     }
 
-    if (!try userExists(opts.config.greeter_user)) {
-        log.err("Greeter user not found: {s}", .{opts.config.greeter_user});
+    if (!try userExists(opts.config.greeter.user)) {
+        log.err("Greeter user not found: {s}", .{opts.config.greeter.user});
         return error.GreeterUserNotFound;
     }
 
@@ -48,10 +48,10 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             .worker_path = opts.self_exe_path,
             .service_name = opts.config.service_name,
             .greeter = .{
-                .user = opts.config.greeter_user,
-                .service_name = opts.config.greeter_service_name,
-                .cmd = opts.greeter_cmd,
-                .session_type = opts.config.greeter_session_type,
+                .user = opts.config.greeter.user,
+                .service_name = opts.config.greeter.service_name,
+                .command = opts.greeter_cmd,
+                .session_type = opts.config.greeter.session_type,
             },
             .x11_cmd = if (build_options.x11_support) opts.config.x11.cmd else null,
             .vt = opts.config.vt,
