@@ -17,6 +17,21 @@
     {
       overlays.default = zgsldOverlay;
 
+      nixosModules = {
+        zgsld =
+          {
+            lib,
+            pkgs,
+            ...
+          }:
+          {
+            imports = [ ./nix/module.nix ];
+            nixpkgs.overlays = [ self.overlays.default ];
+            #services.zgsld.package = lib.mkDefault self.packages.${pkgs.system}.default;
+          };
+        default = self.nixosModules.zgsld;
+      };
+
       packages = forAllSystems (
         system:
         let

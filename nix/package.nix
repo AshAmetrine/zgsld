@@ -35,4 +35,8 @@ stdenv.mkDerivation (finalAttrs: {
     mainProgram = "zgsld";
     platforms = lib.platforms.linux;
   };
+
+  passthru = {
+    inherit x11Support;
+  };
 })
