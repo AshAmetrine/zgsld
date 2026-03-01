@@ -17,6 +17,11 @@ pub const SessionManagerRunOpts = struct {
 pub fn run(opts: SessionManagerRunOpts) !void {
     installSignalHandlers();
 
+    if (!build_options.x11_support and opts.config.greeter_session_type == .x11) {
+        log.err("Greeter X11 session type requested, but zgsld was built without -Dx11 support", .{});
+        return error.X11UnsupportedBuild;
+    }
+
     if (opts.config.vt) |vt_num| {
         vt.initTty(vt_num) catch |err| {
             log.err("Failed to init VT {d}: {s}", .{ vt_num, @errorName(err) });
@@ -39,15 +44,18 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         if (shutdown_requested.load(.seq_cst) != 0) return;
 
         log.debug("Spawning worker...", .{});
-        const worker_proc = try worker.WorkerProcess.spawn(
-            opts.self_exe_path,
-            opts.config.service_name,
-            opts.config.greeter_user,
-            opts.config.greeter_service_name,
-            opts.greeter_cmd,
-            if (build_options.x11_support) opts.config.x11.cmd else null,
-            opts.config.vt,
-        );
+        const worker_proc = try worker.WorkerProcess.spawn(.{
+            .worker_path = opts.self_exe_path,
+            .service_name = opts.config.service_name,
+            .greeter = .{
+                .user = opts.config.greeter_user,
+                .service_name = opts.config.greeter_service_name,
+                .cmd = opts.greeter_cmd,
+                .session_type = opts.config.greeter_session_type,
+            },
+            .x11_cmd = if (build_options.x11_support) opts.config.x11.cmd else null,
+            .vt = opts.config.vt,
+        });
         active_worker_pid.store(worker_proc.pid, .seq_cst);
         defer active_worker_pid.store(0, .seq_cst);
         if (shutdown_requested.load(.seq_cst) != 0) {

@@ -13,7 +13,7 @@ pub fn initZgsldLog() void {
     }
 }
 
-/// Log function for greeters to use the same log output location as zgsld 
+/// Log function for greeters to use the same log output location as zgsld
 ///
 /// `pub const std_options: std.Options = .{ .logFn = zgsld.logFn };`
 pub fn logFn(

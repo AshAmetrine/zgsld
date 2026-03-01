@@ -1,19 +1,25 @@
 const std = @import("std");
+const Ipc = @import("Ipc");
 
 const log = std.log.scoped(.zgsld);
 
 pub const WorkerProcess = struct {
     pid: std.posix.pid_t,
 
-    pub fn spawn(
+    pub const SpawnOpts = struct {
         worker_path: [:0]const u8,
         service_name: []const u8,
-        greeter_user: []const u8,
-        greeter_service_name: []const u8,
-        greeter_cmd: []const u8,
+        greeter: struct {
+            user: []const u8,
+            service_name: []const u8,
+            cmd: []const u8,
+            session_type: Ipc.SessionType,
+        },
         x11_cmd: ?[]const u8,
-        vt_opt: ?u8,
-    ) !WorkerProcess {
+        vt: ?u8,
+    };
+
+    pub fn spawn(opts: SpawnOpts) !WorkerProcess {
         var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const arena_allocator = arena.allocator();
@@ -24,24 +30,28 @@ pub const WorkerProcess = struct {
         if (std.posix.getenv("PATH")) |path| {
             try worker_envmap.put("PATH", path);
         }
-        if (vt_opt) |vt_num| {
+        if (opts.vt) |vt_num| {
             var vt_buf: [4]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
             try worker_envmap.put("ZGSLD_VTNR", vt_value);
         }
-        if (x11_cmd) |cmd| {
+        if (opts.x11_cmd) |cmd| {
             try worker_envmap.put("ZGSLD_X11_CMD", cmd);
         }
-        try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd);
+        try worker_envmap.put(
+            "ZGSLD_GREETER_SESSION_TYPE",
+            @tagName(opts.greeter.session_type),
+        );
+        try worker_envmap.put("ZGSLD_GREETER_CMD", opts.greeter.cmd);
 
         const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
 
-        const service_z = try arena_allocator.dupeZ(u8, service_name);
-        const user_z = try arena_allocator.dupeZ(u8, greeter_user);
-        const greeter_service_z = try arena_allocator.dupeZ(u8, greeter_service_name);
+        const service_z = try arena_allocator.dupeZ(u8, opts.service_name);
+        const user_z = try arena_allocator.dupeZ(u8, opts.greeter.user);
+        const greeter_service_z = try arena_allocator.dupeZ(u8, opts.greeter.service_name);
 
         const argv = [_:null]?[*:0]const u8{
-            @ptrCast(worker_path.ptr),
+            @ptrCast(opts.worker_path.ptr),
             "--session-worker",
             service_z.ptr,
             user_z.ptr,
@@ -50,7 +60,7 @@ pub const WorkerProcess = struct {
 
         const pid = try std.posix.fork();
         if (pid == 0) {
-            std.posix.execvpeZ(worker_path, &argv, worker_environ) catch {
+            std.posix.execvpeZ(opts.worker_path, &argv, worker_environ) catch {
                 log.err("Worker exec error\n", .{});
             };
             std.process.exit(1);

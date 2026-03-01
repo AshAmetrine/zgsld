@@ -32,8 +32,8 @@ const EventType = enum {
 
 /// Session type chosen by the greeter after authentication succeeds.
 pub const SessionType = enum(u8) {
-    Command = 0,
-    X11 = 1,
+    command = 0,
+    x11 = 1,
 };
 
 /// Payload for `start_session`.

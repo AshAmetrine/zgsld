@@ -5,6 +5,7 @@
 //! - `greeter_cmd` is `void` for standalone greeter builds.
 
 const build_options = @import("build_options");
+const Ipc = @import("Ipc");
 
 const X11Config = struct {
     cmd: []const u8 = build_options.x11_cmd,
@@ -22,6 +23,9 @@ greeter_service_name: []const u8 = build_options.greeter_service_name,
 /// VT to switch to before starting greeter/session.
 /// null to use current controlling tty
 vt: ?u8 = build_options.vt,
+
+/// Session backend used to run the greeter process.
+greeter_session_type: Ipc.SessionType = .command,
 
 /// X11 configuration (`void` when built without `-Dx11`).
 x11: if (build_options.x11_support) X11Config else void =

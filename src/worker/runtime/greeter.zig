@@ -18,6 +18,7 @@ pub const Greeter = struct {
     session: ?Session = null,
     user_z: [:0]const u8,
     user_info: UserInfo,
+    closed: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, opts: GreeterOpts) !Greeter {
         const pw = std.c.getpwnam(opts.username) orelse return error.GreeterUserNotFound;
@@ -41,7 +42,12 @@ pub const Greeter = struct {
         };
     }
 
-    pub fn spawn(self: *Greeter, ipc_fd: std.posix.fd_t, greeter_cmd: []const u8) !void {
+    pub fn spawn(
+        self: *Greeter,
+        ipc_fd: std.posix.fd_t,
+        greeter_cmd: []const u8,
+        session_type: Ipc.SessionType,
+    ) !void {
         try self.pam.openSession(.{});
         var envmap = try self.pam.createEnvListMap();
         defer envmap.deinit();
@@ -57,7 +63,7 @@ pub const Greeter = struct {
         try envmap.put("ZGSLD_LOG", log_fd_str);
 
         const session_info: Ipc.SessionInfo = .{
-            .session_type = .Command,
+            .session_type = session_type,
             .command = .{
                 .session_cmd = greeter_cmd,
                 .source_profile = false,
@@ -77,6 +83,8 @@ pub const Greeter = struct {
     }
 
     pub fn deinit(self: *Greeter) void {
+        if (self.closed) return;
+        self.closed = true;
         if (self.session) |*session| session.deinit();
         self.pam.deinit();
         self.session = null;

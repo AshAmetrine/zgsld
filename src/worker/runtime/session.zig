@@ -57,7 +57,7 @@ pub const Session = struct {
     };
 
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOpts) !Session {
-        if (!build_options.x11_support and opts.session_info.session_type == .X11) {
+        if (!build_options.x11_support and opts.session_info.session_type == .x11) {
             return error.X11UnsupportedBuild;
         }
 
@@ -66,7 +66,7 @@ pub const Session = struct {
             std.fs.deleteFileAbsolute(setup.xauth_path) catch {};
             allocator.free(setup.xauth_path);
         };
-        if (build_options.x11_support and opts.session_info.session_type == .X11) {
+        if (build_options.x11_support and opts.session_info.session_type == .x11) {
             const display_num = try x11.findFreeDisplay();
 
             var display_buf: [4]u8 = undefined;
@@ -89,7 +89,7 @@ pub const Session = struct {
         defer arena.deinit();
         const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), opts.envmap);
 
-        if (build_options.x11_support and opts.session_info.session_type == .X11) {
+        if (build_options.x11_support and opts.session_info.session_type == .x11) {
             const setup = x11_setup orelse return error.X11SetupMissing;
             const x_cmd = std.posix.getenv("ZGSLD_X11_CMD") orelse "/bin/X";
             const vt = if (opts.envmap.get("XDG_VTNR")) |vt_str|

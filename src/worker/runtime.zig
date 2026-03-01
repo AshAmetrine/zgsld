@@ -63,6 +63,8 @@ pub const WorkerRuntime = struct {
         const greeter_username: [:0]const u8 = std.mem.span(argv[3]);
         const greeter_service = std.mem.span(argv[4]);
         const greeter_cmd = std.posix.getenv("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
+        const greeter_session_type_raw = std.posix.getenv("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
+        const greeter_session_type = std.meta.stringToEnum(Ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
 
         const vt = if (std.posix.getenv("ZGSLD_VTNR")) |vt_str| blk: {
             break :blk try std.fmt.parseInt(u8, vt_str, 10);
@@ -78,7 +80,7 @@ pub const WorkerRuntime = struct {
         const greeter_pid = blk: {
             defer std.posix.close(fds.child);
             errdefer std.posix.close(fds.parent);
-            try greeter.spawn(fds.child, greeter_cmd);
+            try greeter.spawn(fds.child, greeter_cmd, greeter_session_type);
             break :blk greeter.pid() orelse return error.GreeterSessionMissing;
         };
 
@@ -93,7 +95,7 @@ pub const WorkerRuntime = struct {
         try self.runIpcLoop(.{
             .service_name = service,
             .ipc_conn = &ipc_conn,
-            .greeter_pid = greeter_pid,
+            .greeter = &greeter,
             .vt = vt,
         });
     }
@@ -101,7 +103,7 @@ pub const WorkerRuntime = struct {
     const RunOpts = struct {
         service_name: []const u8,
         ipc_conn: *Ipc.Connection,
-        greeter_pid: std.posix.pid_t,
+        greeter: *Greeter,
         vt: ?u8,
     };
 
@@ -115,6 +117,7 @@ pub const WorkerRuntime = struct {
         var writer = opts.ipc_conn.writer(&wbuf);
         const ipc_reader = &reader.interface;
         const ipc_writer = &writer.interface;
+        const greeter_pid = opts.greeter.pid() orelse return error.GreeterSessionMissing;
 
         while (true) {
             log.debug("Waiting for event", .{});
@@ -193,9 +196,14 @@ pub const WorkerRuntime = struct {
                             },
                             .start_session => |info| {
                                 log.debug("Waiting for greeter exit before starting session...", .{});
-                                _ = std.posix.waitpid(opts.greeter_pid, 0);
+                                _ = std.posix.waitpid(greeter_pid, 0);
                                 active_child_pid.store(0, .seq_cst);
                                 if (shutdownRequested()) return;
+
+                                // Ensure greeter resources (including an X11 server, if used)
+                                // are torn down before launching the user session.
+                                opts.greeter.deinit();
+
                                 log.debug("Starting session...", .{});
 
                                 var session = blk: {
@@ -284,8 +292,6 @@ fn loginConv(
         }
     }
 }
-
-
 
 // Signal Handling
 
