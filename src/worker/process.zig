@@ -1,5 +1,7 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const build_options = @import("build_options");
+const Config = @import("../Config.zig");
 
 const log = std.log.scoped(.zgsld);
 
@@ -7,22 +9,24 @@ pub const WorkerProcess = struct {
     pid: std.posix.pid_t,
 
     pub const SpawnOpts = struct {
+        allocator: std.mem.Allocator,
         worker_path: [:0]const u8,
-        service_name: []const u8,
-        greeter: struct {
-            user: []const u8,
-            service_name: []const u8,
-            session_type: Ipc.SessionType,
-            command: []const u8,
-        },
-        x11_cmd: ?[]const u8,
-        vt: ?u8,
+        greeter_cmd: if (build_options.standalone) []const u8 else void,
+        config: Config,
     };
 
     pub fn spawn(opts: SpawnOpts) !WorkerProcess {
-        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+        var arena = std.heap.ArenaAllocator.init(opts.allocator);
         defer arena.deinit();
         const arena_allocator = arena.allocator();
+
+        const greeter_cmd_str: []const u8 = if (build_options.standalone) blk: {
+            if (opts.greeter_cmd.len == 0) return error.NullGreeterCmd;
+            break :blk opts.greeter_cmd;
+        } else if (opts.config.greeter.command) |cmd| blk: {
+            if (cmd.len == 0) return error.NullGreeterCmd;
+            break :blk cmd;
+        } else return error.NullGreeterCmd;
 
         var worker_envmap = std.process.EnvMap.init(arena_allocator);
         defer worker_envmap.deinit();
@@ -30,25 +34,25 @@ pub const WorkerProcess = struct {
         if (std.posix.getenv("PATH")) |path| {
             try worker_envmap.put("PATH", path);
         }
-        if (opts.vt) |vt_num| {
+        if (opts.config.vt) |vt_num| {
             var vt_buf: [4]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
             try worker_envmap.put("ZGSLD_VTNR", vt_value);
         }
-        if (opts.x11_cmd) |cmd| {
-            try worker_envmap.put("ZGSLD_X11_CMD", cmd);
+        if (build_options.x11_support) {
+            try worker_envmap.put("ZGSLD_X11_CMD", opts.config.x11.command);
         }
         try worker_envmap.put(
             "ZGSLD_GREETER_SESSION_TYPE",
-            @tagName(opts.greeter.session_type),
+            @tagName(opts.config.greeter.session_type),
         );
-        try worker_envmap.put("ZGSLD_GREETER_CMD", opts.greeter.command);
+        try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd_str);
 
         const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
 
-        const service_z = try arena_allocator.dupeZ(u8, opts.service_name);
-        const user_z = try arena_allocator.dupeZ(u8, opts.greeter.user);
-        const greeter_service_z = try arena_allocator.dupeZ(u8, opts.greeter.service_name);
+        const service_z = try arena_allocator.dupeZ(u8, opts.config.session.service_name);
+        const user_z = try arena_allocator.dupeZ(u8, opts.config.greeter.user);
+        const greeter_service_z = try arena_allocator.dupeZ(u8, opts.config.greeter.service_name);
 
         const argv = [_:null]?[*:0]const u8{
             @ptrCast(opts.worker_path.ptr),

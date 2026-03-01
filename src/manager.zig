@@ -8,11 +8,19 @@ const build_options = @import("build_options");
 var active_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
 var shutdown_requested = std.atomic.Value(u8).init(0);
 
-pub const SessionManagerRunOpts = struct {
-    self_exe_path: [:0]const u8,
-    greeter_cmd: []const u8,
-    config: Config,
-};
+pub const SessionManagerRunOpts = if (build_options.standalone)
+    struct {
+        allocator: std.mem.Allocator,
+        self_exe_path: [:0]const u8,
+        greeter_cmd: []const u8,
+        config: Config,
+    }
+else
+    struct {
+        allocator: std.mem.Allocator,
+        self_exe_path: [:0]const u8,
+        config: Config,
+    };
 
 pub fn run(opts: SessionManagerRunOpts) !void {
     installSignalHandlers();
@@ -44,17 +52,12 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         if (shutdown_requested.load(.seq_cst) != 0) return;
 
         log.debug("Spawning worker...", .{});
+        const greeter_cmd = if (build_options.standalone) opts.greeter_cmd else {};
         const worker_proc = try worker.WorkerProcess.spawn(.{
+            .allocator = opts.allocator,
             .worker_path = opts.self_exe_path,
-            .service_name = opts.config.session.service_name,
-            .greeter = .{
-                .user = opts.config.greeter.user,
-                .service_name = opts.config.greeter.service_name,
-                .command = opts.greeter_cmd,
-                .session_type = opts.config.greeter.session_type,
-            },
-            .x11_cmd = if (build_options.x11_support) opts.config.x11.cmd else null,
-            .vt = opts.config.vt,
+            .greeter_cmd = greeter_cmd,
+            .config = opts.config,
         });
         active_worker_pid.store(worker_proc.pid, .seq_cst);
         defer active_worker_pid.store(0, .seq_cst);

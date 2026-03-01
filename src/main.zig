@@ -74,17 +74,10 @@ pub fn main() !void {
         config.vt = vt;
     }
 
-    if (config.greeter.command) |cmd| {
-        if (cmd.len == 0) return error.NullGreeterCmd;
-
-        const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
-        try session_manager.run(.{
-            .self_exe_path = self_exe_path_z,
-            .greeter_cmd = cmd,
-            .config = config,
-        });
-        return;
-    } else {
-        return error.NullGreeterCmd;
-    }
+    const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
+    try session_manager.run(.{
+        .allocator = allocator,
+        .self_exe_path = self_exe_path_z,
+        .config = config,
+    });
 }

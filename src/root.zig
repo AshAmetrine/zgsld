@@ -146,10 +146,10 @@ pub const Zgsld = struct {
                 try appendShellQuotedArg(&cmd_buf, self.allocator, std.mem.span(arg));
             }
             const greeter_cmd = cmd_buf.items;
-
             log.debug("Greeter Cmd: {s}", .{greeter_cmd});
 
             try session_manager.run(.{
+                .allocator = self.allocator,
                 .self_exe_path = self_exe_path_z,
                 .greeter_cmd = greeter_cmd,
                 .config = zgsld_config,
