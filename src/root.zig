@@ -132,7 +132,7 @@ pub const Zgsld = struct {
 
             log.debug("Greeter Path: {s}", .{self_exe_path_z});
             log.debug("Greeter User: {s}", .{zgsld_config.greeter.user});
-            log.debug("PAM Service Name: {s}", .{zgsld_config.service_name});
+            log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
             log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
 
             const argv = std.os.argv;

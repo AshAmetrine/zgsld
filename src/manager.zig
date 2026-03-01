@@ -46,7 +46,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         log.debug("Spawning worker...", .{});
         const worker_proc = try worker.WorkerProcess.spawn(.{
             .worker_path = opts.self_exe_path,
-            .service_name = opts.config.service_name,
+            .service_name = opts.config.session.service_name,
             .greeter = .{
                 .user = opts.config.greeter.user,
                 .service_name = opts.config.greeter.service_name,

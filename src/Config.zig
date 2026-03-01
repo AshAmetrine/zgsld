@@ -27,15 +27,17 @@ const GreeterConfig = struct {
     if (!build_options.standalone) null else {},
 };
 
-greeter: GreeterConfig = .{},
-
-/// PAM service used for user authentication.
-service_name: []const u8 = build_options.service_name,
+const SessionConfig = struct {
+    /// PAM service used for user authentication.
+    service_name: []const u8 = build_options.service_name,
+};
 
 /// VT to switch to before starting greeter/session.
 /// null to use current controlling tty
 vt: ?u8 = build_options.vt,
 
+greeter: GreeterConfig = .{},
+session: SessionConfig = .{},
 
 /// X11 configuration (`void` when built without `-Dx11`).
 x11: if (build_options.x11_support) X11Config else void =
