@@ -11,17 +11,17 @@ const c = @cImport({
 });
 const log = std.log.scoped(.zgsld);
 extern "c" fn getsid(pid: std.posix.pid_t) std.posix.pid_t;
+extern "c" fn ttyname_r(fd: std.posix.fd_t, buf: [*]u8, buflen: usize) c_int;
 
 // std.c.ioctl definition expects request to be c_int
-// but for glibc/BSD, it should be c_ulong
-extern "c" fn ioctl(fd: std.posix.fd_t, request: c_ulong, ...) c_int;
+// but for glibc/BSD, it should be c_ulong, so we use c.ioctl instead
 
 pub fn initTty(tty: u8) !void {
     if (tty == 0) return error.InvalidTty;
     try activateTty(tty);
 
-    var path_buf: [32]u8 = undefined;
-    const tty_path = try std.fmt.bufPrintZ(&path_buf, "/dev/tty{d}", .{tty});
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tty_path = try getTtyPath(&path_buf, tty);
     var tty_file = try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write });
     defer if (tty_file.handle > 2) tty_file.close();
 
@@ -37,7 +37,7 @@ pub fn initTty(tty: u8) !void {
         else => return err,
     };
 
-    const status = ioctl(tty_file.handle, c.TIOCSCTTY, @as(c_int, 0));
+    const status = c.ioctl(tty_file.handle, c.TIOCSCTTY, @as(c_int, 0));
     if (status != 0) return error.FailedToSetControllingTty;
 }
 
@@ -45,8 +45,8 @@ pub fn resetTty(tty: u8) !void {
     if (tty == 0) return error.InvalidTty;
     try activateTty(tty);
 
-    var path_buf: [32]u8 = undefined;
-    const tty_path = try std.fmt.bufPrintZ(&path_buf, "/dev/tty{d}", .{tty});
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tty_path = try getTtyPath(&path_buf, tty);
     var tty_file = try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write });
     defer if (tty_file.handle > 2) tty_file.close();
 
@@ -77,19 +77,19 @@ fn activateTty(tty: u8) !void {
         var setactivate = std.mem.zeroes(c.struct_vt_setactivate);
         setactivate.console = tty;
         setactivate.mode.mode = c.VT_AUTO;
-        const status = ioctl(console.handle, c.VT_SETACTIVATE, &setactivate);
+        const status = c.ioctl(console.handle, c.VT_SETACTIVATE, &setactivate);
         if (status != 0) return error.FailedToActivateTty;
     } else {
         var mode = std.mem.zeroes(c.struct_vt_mode);
         mode.mode = c.VT_AUTO;
-        const mode_status = ioctl(console.handle, c.VT_SETMODE, &mode);
+        const mode_status = c.ioctl(console.handle, c.VT_SETMODE, &mode);
         if (mode_status != 0) return error.FailedToSetTtyMode;
 
-        const status = ioctl(console.handle, c.VT_ACTIVATE, @as(c_int, tty));
+        const status = c.ioctl(console.handle, c.VT_ACTIVATE, @as(c_int, tty));
         if (status != 0) return error.FailedToActivateTty;
     }
 
-    const wait_status = ioctl(console.handle, c.VT_WAITACTIVE, @as(c_int, tty));
+    const wait_status = c.ioctl(console.handle, c.VT_WAITACTIVE, @as(c_int, tty));
     if (wait_status != 0) return error.FailedToWaitForActiveTty;
 }
 
@@ -100,15 +100,36 @@ fn openConsoleFile() !std.fs.File {
 
 fn setTextMode(fd: std.posix.fd_t) !void {
     if (comptime builtin.os.tag != .linux) return;
-    const status = ioctl(fd, c.KDSETMODE, @as(c_int, c.KD_TEXT));
+    const status = c.ioctl(fd, c.KDSETMODE, @as(c_int, c.KD_TEXT));
     if (status != 0) return error.FailedToSetTextMode;
 }
 
 fn controllingTtyIs(fd: std.posix.fd_t) bool {
     var sid: std.posix.pid_t = undefined;
-    if (ioctl(fd, c.TIOCGSID, &sid) == 0) {
+    if (c.ioctl(fd, c.TIOCGSID, &sid) == 0) {
         const current_sid = getsid(0);
         if (current_sid >= 0 and sid == current_sid) return true;
     }
     return false;
+}
+
+pub fn getCurrentTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
+    var tty_file = try std.fs.openFileAbsolute("/dev/tty", .{ .mode = .read_only });
+    defer tty_file.close();
+
+    const rc = ttyname_r(tty_file.handle, @ptrCast(buf), buf.len);
+    if (rc != 0) return std.posix.unexpectedErrno(@enumFromInt(rc));
+
+    const tty_path = std.mem.sliceTo(buf, 0);
+    return buf[0..tty_path.len :0];
+}
+
+pub fn getTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![]const u8 {
+    if (target_vt == 0) return error.InvalidTty;
+
+    return switch (builtin.os.tag) {
+        .linux => std.fmt.bufPrint(buf, "/dev/tty{d}", .{target_vt}),
+        .freebsd => std.fmt.bufPrint(buf, "/dev/ttyv{x}", .{target_vt - 1}),
+        else => error.UnsupportedPlatform,
+    };
 }

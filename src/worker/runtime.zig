@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const SocketPair = @import("../SocketPair.zig");
+const vt_mod = @import("../vt.zig");
 const greeter_mod = @import("runtime/greeter.zig");
 const session_mod = @import("runtime/session.zig");
 const env_mod = @import("runtime/env.zig");
@@ -156,6 +157,10 @@ pub const WorkerRuntime = struct {
                         .state = &pam_state,
                     });
                     defer pam.deinit();
+
+                    var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    const tty_z: [:0]const u8 = vt_mod.getCurrentTtyPath(&tty_path_buf) catch "/dev/tty";
+                    try pam.setItem(.{ .tty = tty_z });
 
                     pam.authenticate(.{}) catch {
                         if (ctx.cancelled) {

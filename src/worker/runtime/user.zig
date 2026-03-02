@@ -1,12 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @cImport({
-    if (builtin.os.tag == .linux) {
-        @cInclude("grp.h");
-    } else if (builtin.os.tag == .freebsd) {
-        @cInclude("unistd.h");
-    }
-});
+
+extern "c" fn initgroups(user: [*:0]const u8, group: std.posix.gid_t) c_int;
 
 pub const UserInfo = struct {
     username: [:0]const u8,
@@ -18,7 +13,7 @@ pub fn dropPrivileges(user_info: UserInfo) !void {
     if (comptime builtin.os.tag != .linux and builtin.os.tag != .freebsd) {
         return error.UnsupportedPlatform;
     }
-    if (c.initgroups(user_info.username, user_info.gid) != 0) {
+    if (initgroups(user_info.username, user_info.gid) != 0) {
         return std.posix.unexpectedErrno(std.posix.errno(-1));
     }
     try std.posix.setgid(user_info.gid);
