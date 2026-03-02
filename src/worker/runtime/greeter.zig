@@ -48,6 +48,7 @@ pub const Greeter = struct {
         greeter_cmd: []const u8,
         session_type: Ipc.SessionType,
     ) !void {
+        try self.pam.putEnv("XDG_SESSION_CLASS=greeter");
         try self.pam.openSession(.{});
         var envmap = try self.pam.createEnvListMap();
         defer envmap.deinit();
