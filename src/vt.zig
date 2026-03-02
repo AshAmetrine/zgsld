@@ -64,6 +64,11 @@ pub fn resetTermios() void {
     std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, termios) catch {};
 }
 
+pub fn ensureControllingTty() !void {
+    var tty_file = try std.fs.openFileAbsolute("/dev/tty", .{ .mode = .read_write });
+    tty_file.close();
+}
+
 fn activateTty(tty: u8) !void {
     var console = try openConsoleFile();
     defer console.close();

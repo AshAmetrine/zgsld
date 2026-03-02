@@ -35,6 +35,11 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             log.err("Failed to init VT {d}: {s}", .{ vt_num, @errorName(err) });
             std.process.exit(1);
         };
+    } else {
+        vt.ensureControllingTty() catch |err| {
+            log.err("VT is unset and no controlling TTY is available: {s}", .{@errorName(err)});
+            std.process.exit(1);
+        };
     }
 
     if (!try userExists(opts.config.greeter.user)) {
