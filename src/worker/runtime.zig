@@ -38,6 +38,7 @@ fn startSession(
         .session_info = info,
         .envmap = session_envmap,
         .user_info = user_info,
+        .vt = vt,
     });
 }
 
@@ -80,7 +81,7 @@ pub const WorkerRuntime = struct {
         const greeter_pid = blk: {
             defer std.posix.close(fds.child);
             errdefer std.posix.close(fds.parent);
-            try greeter.spawn(fds.child, greeter_cmd, greeter_session_type);
+            try greeter.spawn(fds.child, greeter_cmd, greeter_session_type, vt);
             break :blk greeter.pid() orelse return error.GreeterSessionMissing;
         };
 

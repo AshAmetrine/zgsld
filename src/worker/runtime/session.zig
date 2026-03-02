@@ -54,6 +54,7 @@ pub const Session = struct {
         session_info: Ipc.SessionInfo,
         envmap: *std.process.EnvMap,
         user_info: UserInfo,
+        vt: ?u8,
     };
 
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOpts) !Session {
@@ -92,15 +93,11 @@ pub const Session = struct {
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
             const setup = x11_setup orelse return error.X11SetupMissing;
             const x_cmd = std.posix.getenv("ZGSLD_X11_CMD") orelse "/bin/X";
-            const vt = if (opts.envmap.get("XDG_VTNR")) |vt_str|
-                try std.fmt.parseInt(u8, vt_str, 10)
-            else
-                null;
             const launcher_pid = try x11.startXServer(allocator, .{
                 .x_cmd = x_cmd,
                 .xauth_path = setup.xauth_path,
                 .display = setup.display,
-                .vt = vt,
+                .vt = opts.vt,
                 .user = opts.user_info,
             });
 

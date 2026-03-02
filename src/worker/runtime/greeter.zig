@@ -47,6 +47,7 @@ pub const Greeter = struct {
         ipc_fd: std.posix.fd_t,
         greeter_cmd: []const u8,
         session_type: Ipc.SessionType,
+        vt: ?u8,
     ) !void {
         try self.pam.putEnv("XDG_SESSION_CLASS=greeter");
         try self.pam.openSession(.{});
@@ -63,6 +64,12 @@ pub const Greeter = struct {
         const log_fd_str = try std.fmt.bufPrintZ(&log_fd_buf, "{d}", .{log_fd});
         try envmap.put("ZGSLD_LOG", log_fd_str);
 
+        if (vt) |vt_num| {
+            var vt_buf: [3]u8 = undefined;
+            const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
+            try envmap.put("XDG_VTNR", vt_value);
+        }
+
         const session_info: Ipc.SessionInfo = .{
             .session_type = session_type,
             .command = .{
@@ -75,6 +82,7 @@ pub const Greeter = struct {
             .session_info = session_info,
             .envmap = &envmap,
             .user_info = self.user_info,
+            .vt = vt,
         });
     }
 
