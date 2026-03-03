@@ -52,7 +52,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             std.process.exit(1);
         };
     } else {
-        vt.ensureControllingTty() catch |err| {
+        vt.initCurrentTty() catch |err| {
             log.err("VT is unset and no controlling TTY is available: {s}", .{@errorName(err)});
             std.process.exit(1);
         };
@@ -71,6 +71,10 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             vt.resetTermios();
         }
         if (shutdown_requested.load(.seq_cst) != 0) return;
+
+        vt.restoreControllingTty(opts.config.vt) catch |err| {
+            log.warn("Failed to restore controlling TTY before spawning workers: {s}", .{@errorName(err)});
+        };
 
         const greeter_cmd = if (build_options.standalone) opts.greeter_cmd else {};
         const spawned = try spawnWorkers(.{
