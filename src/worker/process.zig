@@ -5,6 +5,11 @@ const Config = @import("../Config.zig");
 
 const log = std.log.scoped(.zgsld);
 
+pub const SessionClass = enum {
+    user,
+    greeter,
+};
+
 pub const WorkerProcess = struct {
     pid: std.posix.pid_t,
 
@@ -13,6 +18,8 @@ pub const WorkerProcess = struct {
         worker_path: [:0]const u8,
         greeter_cmd: if (build_options.standalone) []const u8 else void,
         config: Config,
+        session_class: SessionClass,
+        ipc_fd: std.posix.fd_t,
     };
 
     pub fn spawn(opts: SpawnOpts) !WorkerProcess {
@@ -48,18 +55,30 @@ pub const WorkerProcess = struct {
         );
         try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd_str);
 
+        var fd_buf: [16]u8 = undefined;
+        const zgsld_sock = try std.fmt.bufPrint(&fd_buf, "{d}", .{opts.ipc_fd});
+        try worker_envmap.put("ZGSLD_SOCK", zgsld_sock);
+
         const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
 
-        const service_z = try arena_allocator.dupeZ(u8, opts.config.session.service_name);
-        const user_z = try arena_allocator.dupeZ(u8, opts.config.greeter.user);
-        const greeter_service_z = try arena_allocator.dupeZ(u8, opts.config.greeter.service_name);
+        const service_name = switch (opts.session_class) {
+            .greeter => opts.config.greeter.service_name,
+            .user => opts.config.session.service_name,
+        };
+
+        var greeter_user_z: ?[*:0]const u8 = null;
+        if (opts.session_class == .greeter) {
+            greeter_user_z = try arena_allocator.dupeZ(u8, opts.config.greeter.user);
+        }
+
+        const service_name_z = try arena_allocator.dupeZ(u8, service_name);
 
         const argv = [_:null]?[*:0]const u8{
             @ptrCast(opts.worker_path.ptr),
             "--session-worker",
-            service_z.ptr,
-            user_z.ptr,
-            greeter_service_z.ptr,
+            @tagName(opts.session_class),
+            service_name_z,
+            greeter_user_z,
         };
 
         const pid = try std.posix.fork();

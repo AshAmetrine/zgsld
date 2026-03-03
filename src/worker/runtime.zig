@@ -7,6 +7,7 @@ const session_mod = @import("runtime/session.zig");
 const env_mod = @import("runtime/env.zig");
 const pam_mod = @import("pam");
 const pam_conv = @import("runtime/pam_conv.zig");
+const SessionClass = @import("process.zig").SessionClass;
 
 const Pam = pam_mod.Pam;
 const PamCtx = pam_conv.PamCtx;
@@ -61,52 +62,64 @@ pub const WorkerRuntime = struct {
         installSignalHandlers();
 
         const argv = std.os.argv;
-        if (argv.len < 5) return error.MissingWorkerArgs;
-        const service = std.mem.span(argv[2]);
-        const greeter_username: [:0]const u8 = std.mem.span(argv[3]);
-        const greeter_service = std.mem.span(argv[4]);
-        const greeter_cmd = std.posix.getenv("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
-        const greeter_session_type_raw = std.posix.getenv("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
-        const greeter_session_type = std.meta.stringToEnum(Ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
+        if (argv.len < 3) return error.MissingWorkerArgs;
+        const session_class = std.meta.stringToEnum(SessionClass, std.mem.span(argv[2])) orelse return error.InvalidSessionClass;
+
+        const expected_argv_len: usize = if (session_class == .greeter) 5 else 4;
+        if (argv.len < expected_argv_len) return error.MissingWorkerArgs;
+
+        const service = std.mem.span(argv[3]);
 
         const vt = if (std.posix.getenv("ZGSLD_VTNR")) |vt_str| blk: {
             break :blk try std.fmt.parseInt(u8, vt_str, 10);
         } else null;
 
-        var greeter = try Greeter.init(self.allocator, .{
-            .service_name = greeter_service,
-            .username = greeter_username,
-        });
-        defer greeter.deinit();
+        const sock_fd = if (std.posix.getenv("ZGSLD_SOCK")) |fd| blk: {
+            break :blk try std.fmt.parseInt(std.posix.fd_t, fd, 10);
+        } else return error.MissingZgsldSock;
 
-        const fds = try SocketPair.init(true);
-        const greeter_pid = blk: {
-            defer std.posix.close(fds.child);
-            errdefer std.posix.close(fds.parent);
-            try greeter.spawn(fds.child, greeter_cmd, greeter_session_type, vt);
-            break :blk greeter.pid() orelse return error.GreeterSessionMissing;
-        };
+        switch (session_class) {
+            .greeter => {
+                const greeter_username = std.mem.span(argv[4]);
+                const greeter_cmd = std.posix.getenv("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
+                const greeter_session_type_raw = std.posix.getenv("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
+                const greeter_session_type = std.meta.stringToEnum(Ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
 
-        active_child_pid.store(greeter_pid, .seq_cst);
-        if (shutdownRequested()) {
-            forwardShutdownSignal(shutdown_signal.load(.seq_cst));
+                var greeter = try Greeter.init(self.allocator, .{
+                    .service_name = service,
+                    .username = greeter_username,
+                });
+                defer greeter.deinit();
+
+                const greeter_pid = blk: {
+                    defer std.posix.close(sock_fd);
+                    try greeter.spawn(sock_fd, greeter_cmd, greeter_session_type, vt);
+                    break :blk greeter.pid() orelse return error.GreeterSessionMissing;
+                };
+                active_child_pid.store(greeter_pid, .seq_cst);
+                if (shutdownRequested()) {
+                    forwardShutdownSignal(shutdown_signal.load(.seq_cst));
+                }
+                _ = std.posix.waitpid(greeter_pid, 0);
+                active_child_pid.store(0, .seq_cst);
+                return;
+            },
+            .user => {
+                var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
+                defer ipc_conn.deinit();
+
+                try self.runIpcLoop(.{
+                    .service_name = service,
+                    .ipc_conn = &ipc_conn,
+                    .vt = vt,
+                });
+            },
         }
-
-        var ipc_conn = Ipc.Connection.initFromFd(fds.parent);
-        defer ipc_conn.deinit();
-
-        try self.runIpcLoop(.{
-            .service_name = service,
-            .ipc_conn = &ipc_conn,
-            .greeter = &greeter,
-            .vt = vt,
-        });
     }
 
     const RunOpts = struct {
         service_name: []const u8,
         ipc_conn: *Ipc.Connection,
-        greeter: *Greeter,
         vt: ?u8,
     };
 
@@ -120,7 +133,6 @@ pub const WorkerRuntime = struct {
         var writer = opts.ipc_conn.writer(&wbuf);
         const ipc_reader = &reader.interface;
         const ipc_writer = &writer.interface;
-        const greeter_pid = opts.greeter.pid() orelse return error.GreeterSessionMissing;
 
         while (true) {
             log.debug("Waiting for event", .{});
@@ -203,13 +215,7 @@ pub const WorkerRuntime = struct {
                             },
                             .start_session => |info| {
                                 log.debug("Waiting for greeter exit before starting session...", .{});
-                                _ = std.posix.waitpid(greeter_pid, 0);
-                                active_child_pid.store(0, .seq_cst);
                                 if (shutdownRequested()) return;
-
-                                // Ensure greeter resources (including an X11 server, if used)
-                                // are torn down before launching the user session.
-                                opts.greeter.deinit();
 
                                 log.debug("Starting session...", .{});
 
