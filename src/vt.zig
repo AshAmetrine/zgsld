@@ -124,6 +124,25 @@ pub fn getCurrentTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     return buf[0..tty_path.len :0];
 }
 
+pub fn getInheritedTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
+    const inherited_fds = [_]std.posix.fd_t{
+        std.posix.STDIN_FILENO,
+        std.posix.STDOUT_FILENO,
+        std.posix.STDERR_FILENO,
+    };
+
+    for (inherited_fds) |fd| {
+        const rc = ttyname_r(fd, @ptrCast(buf), buf.len);
+        if (rc != 0) continue;
+
+        const tty_path = std.mem.sliceTo(buf, 0);
+        if (std.mem.eql(u8, tty_path, "/dev/tty")) continue;
+        return buf[0..tty_path.len :0];
+    }
+
+    return error.NoInheritedTty;
+}
+
 pub fn getTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![:0]const u8 {
     if (target_vt == 0) return error.InvalidTty;
 

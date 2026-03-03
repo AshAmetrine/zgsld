@@ -180,10 +180,22 @@ pub const WorkerRuntime = struct {
                             }
                         }
 
-                        break :blk vt_mod.getCurrentTtyPath(&tty_path_buf) catch |err| {
-                            log.warn("Failed to resolve current TTY path for PAM_TTY: {s}", .{@errorName(err)});
-                            break :blk "/dev/tty";
-                        };
+                        if (vt_mod.getInheritedTtyPath(&tty_path_buf)) |tty_path| {
+                            break :blk tty_path;
+                        } else |err| {
+                            log.warn("Failed to resolve inherited TTY path for PAM_TTY: {s}", .{@errorName(err)});
+                        }
+
+                        if (vt_mod.getCurrentTtyPath(&tty_path_buf)) |tty_path| {
+                            if (std.mem.eql(u8, tty_path, "/dev/tty")) {
+                                log.err("Refusing to set PAM_TTY to /dev/tty alias", .{});
+                                return error.InvalidPamTty;
+                            }
+                            break :blk tty_path;
+                        } else |err| {
+                            log.err("Failed to resolve current TTY path for PAM_TTY: {s}", .{@errorName(err)});
+                            return error.InvalidPamTty;
+                        }
                     };
                     try pam.setItem(.{ .tty = tty_z });
 
