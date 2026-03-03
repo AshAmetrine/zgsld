@@ -171,7 +171,20 @@ pub const WorkerRuntime = struct {
                     defer pam.deinit();
 
                     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                    const tty_z: [:0]const u8 = vt_mod.getCurrentTtyPath(&tty_path_buf) catch "/dev/tty";
+                    const tty_z: [:0]const u8 = blk: {
+                        if (opts.vt) |vt_num| {
+                            if (vt_mod.getTtyPath(&tty_path_buf, vt_num)) |tty_path| {
+                                break :blk tty_path;
+                            } else |err| {
+                                log.warn("Failed to resolve configured VT path for PAM_TTY: {s}", .{@errorName(err)});
+                            }
+                        }
+
+                        break :blk vt_mod.getCurrentTtyPath(&tty_path_buf) catch |err| {
+                            log.warn("Failed to resolve current TTY path for PAM_TTY: {s}", .{@errorName(err)});
+                            break :blk "/dev/tty";
+                        };
+                    };
                     try pam.setItem(.{ .tty = tty_z });
 
                     pam.authenticate(.{}) catch {

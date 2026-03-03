@@ -124,12 +124,12 @@ pub fn getCurrentTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     return buf[0..tty_path.len :0];
 }
 
-pub fn getTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![]const u8 {
+pub fn getTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![:0]const u8 {
     if (target_vt == 0) return error.InvalidTty;
 
     return switch (builtin.os.tag) {
-        .linux => std.fmt.bufPrint(buf, "/dev/tty{d}", .{target_vt}),
-        .freebsd => std.fmt.bufPrint(buf, "/dev/ttyv{x}", .{target_vt - 1}),
+        .linux => std.fmt.bufPrintZ(buf, "/dev/tty{d}", .{target_vt}),
+        .freebsd => std.fmt.bufPrintZ(buf, "/dev/ttyv{x}", .{target_vt - 1}),
         else => error.UnsupportedPlatform,
     };
 }
