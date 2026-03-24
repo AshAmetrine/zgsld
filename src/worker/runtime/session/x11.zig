@@ -10,6 +10,7 @@ const XServerOpts = struct {
     display: u8,
     vt: ?u8,
     user: ?UserInfo,
+    environ: [:null]const ?[*:0]const u8,
 };
 
 pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.pid_t {
@@ -43,7 +44,7 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
             utils.dropPrivileges(u) catch std.process.exit(1);
         }
 
-        std.posix.execvpeZ("/bin/sh", &argv, std.c.environ) catch {};
+        std.posix.execvpeZ("/bin/sh", &argv, opts.environ) catch {};
         std.process.exit(1);
     }
 

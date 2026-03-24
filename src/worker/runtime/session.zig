@@ -99,6 +99,7 @@ pub const Session = struct {
                 .display = setup.display,
                 .vt = opts.vt,
                 .user = opts.user_info,
+                .environ = session_environ,
             });
 
             errdefer {
