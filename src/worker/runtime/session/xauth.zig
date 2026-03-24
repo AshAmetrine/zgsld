@@ -55,10 +55,12 @@ pub fn createXauthEntry(
     defer xauth_file.file.close();
 
     const magic_cookie = mcookie();
+    var hostname_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
+    const hostname = try std.posix.gethostname(&hostname_buf);
 
     const auth = Xauth{
         .family = .FamilyLocal,
-        .address = "",
+        .address = hostname,
         .display_number = display_num,
         .name = "MIT-MAGIC-COOKIE-1",
         .data = &magic_cookie,
