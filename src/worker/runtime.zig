@@ -35,7 +35,7 @@ fn startSession(
     session_envmap: *std.process.EnvMap,
     vt: ?u8,
 ) !Session {
-    try env_mod.applyPamSessionEnv(pam, session_envmap, vt);
+    try env_mod.applyPamUserSessionEnv(pam, session_envmap, vt);
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
         .session_info = info,
