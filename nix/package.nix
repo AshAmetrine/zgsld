@@ -30,7 +30,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   meta = {
     description = "Zig Greeter and Session Launcher Daemon";
-    homepage = "https://github.com/Kawaii-Ash/zgsld";
+    homepage = "https://github.com/ashametrine/zgsld";
     license = lib.licenses.mit;
     mainProgram = "zgsld";
     platforms = lib.platforms.linux;

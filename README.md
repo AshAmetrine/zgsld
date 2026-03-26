@@ -33,7 +33,7 @@ A greeter can be built either as a separate executable or bundled with zgsld to 
 Add the dependency with `zig fetch`:
 
 ```sh
-zig fetch --save git+https://github.com/Kawaii-Ash/zgsld
+zig fetch --save git+https://github.com/ashametrine/zgsld
 ```
 
 ```zig
@@ -47,4 +47,4 @@ const zgsld = b.dependency("zgsld", .{
 exe.root_module.addImport("zgsld", zgsld.module("zgsld"));
 ```
 
-For a usage example, you can check [zgsld-agetty](https://github.com/Kawaii-Ash/zgsld-agetty)
+For a usage example, you can check [zgsld-agetty](https://github.com/ashametrine/zgsld-agetty)

@@ -52,7 +52,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
         in
-        pkgs.nixfmt-rfc-style
+        pkgs.nixfmt-tree
       );
 
       devShells = forAllSystems (

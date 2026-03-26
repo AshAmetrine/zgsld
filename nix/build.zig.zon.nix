@@ -24,7 +24,7 @@ linkFarm "zig-packages" [
   {
     name = "zig_pam-0.1.0--cHVhklUAADuOUdOED_5O2TSKx69IK1HHRkmJSWZ5AiN";
     path = fetchgit {
-      url = "https://github.com/Kawaii-Ash/zig-pam";
+      url = "https://github.com/ashametrine/zig-pam";
       rev = "3fd2f13cd8fec0297f46cc31589418271b90acdd";
       hash = "sha256-JydVPyWaKWp6/lX61TkEQy//rLsKComyXJY0s0XupKA=";
     };
@@ -32,7 +32,7 @@ linkFarm "zig-packages" [
   {
     name = "zigini-0.3.2-BSkB7UVDAAAErcEC6s7zF9bKTe7CjdBgrV35K3DGHpbr";
     path = fetchgit {
-      url = "https://github.com/Kawaii-Ash/zigini";
+      url = "https://github.com/ashametrine/zigini";
       rev = "831f6aff55703b7fa34b43c972d60eb3d5d6f4a4";
       hash = "sha256-5Q4WSsWUaeVCsDgb8mBAf6ufwg6sGDlL1U0jMESgmDo=";
     };

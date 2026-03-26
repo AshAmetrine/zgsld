@@ -11,13 +11,13 @@
         },
 
         .zigini = .{
-            .url = "git+https://github.com/Kawaii-Ash/zigini#831f6aff55703b7fa34b43c972d60eb3d5d6f4a4",
+            .url = "git+https://github.com/ashametrine/zigini#831f6aff55703b7fa34b43c972d60eb3d5d6f4a4",
             .hash = "zigini-0.3.2-BSkB7UVDAAAErcEC6s7zF9bKTe7CjdBgrV35K3DGHpbr",
         },
 
         // Lib Dependencies
         .zig_pam = .{
-            .url = "git+https://github.com/Kawaii-Ash/zig-pam#3fd2f13cd8fec0297f46cc31589418271b90acdd",
+            .url = "git+https://github.com/ashametrine/zig-pam#3fd2f13cd8fec0297f46cc31589418271b90acdd",
             .hash = "zig_pam-0.1.0--cHVhklUAADuOUdOED_5O2TSKx69IK1HHRkmJSWZ5AiN",
         },
     },

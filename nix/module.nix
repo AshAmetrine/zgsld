@@ -33,7 +33,7 @@ let
   // lib.optionalAttrs (x11Support) {
     sections.x11.cmd = x11Command;
   };
- 
+
   finalConfig = lib.recursiveUpdate defaultConfig cfg.settings;
 in
 {
@@ -122,14 +122,15 @@ in
       description = "Zig Greeter and Session Launcher Daemon";
       aliases = [ "display-manager.service" ];
       wantedBy = [ "multi-user.target" ];
-      after = [ "systemd-user-sessions.service" "getty@tty${toString cfg.vt}.service" ];
+      after = [
+        "systemd-user-sessions.service"
+        "getty@tty${toString cfg.vt}.service"
+      ];
       restartIfChanged = false;
       conflicts = [ "getty@tty${toString cfg.vt}.service" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${lib.getExe cfg.package} --config ${
-          iniFmt.generate "zgsld.ini" finalConfig
-        }";
+        ExecStart = "${lib.getExe cfg.package} --config ${iniFmt.generate "zgsld.ini" finalConfig}";
         Restart = "on-failure";
         RestartSec = "1s";
       };
