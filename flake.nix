@@ -1,8 +1,8 @@
 {
-  description = "zgsld flake";
+  description = "ZGSLD: a minimal display manager";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
   outputs =
