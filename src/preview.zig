@@ -1,44 +1,8 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const SocketPair = @import("SocketPair.zig");
-
-pub const Step = union(enum) {
-    pam_message: Ipc.PamMessage,
-    pam_challenge: struct {
-        request: Ipc.PamConvRequest,
-        expected_response: []const u8,
-    },
-
-    pub fn challenge(echo: bool, msg: []const u8, expected_response: []const u8) Step {
-        return .{
-            .pam_challenge = .{
-                .request = .{
-                    .echo = echo,
-                    .message = msg,
-                },
-                .expected_response = expected_response,
-            },
-        };
-    }
-
-    pub fn message(is_error: bool, msg: []const u8) Step {
-        return .{
-            .pam_message = .{
-                .is_error = is_error,
-                .message = msg,
-            },
-        };
-    }
-};
-
-const default_steps = [_]Step{
-    Step.challenge(false, "Password: ", "123"),
-};
-
-pub const Options = struct {
-    steps: []const Step = &default_steps,
-    expected_user: ?[]const u8 = "user",
-};
+pub const types = @import("preview/types.zig");
+const Options = types.Options;
 
 pub const Runtime = struct {
     ipc_conn: Ipc.Connection,
@@ -105,6 +69,21 @@ const AuthState = enum {
     ok,
 };
 
+const StepState = struct {
+    previous_response_buf: [Ipc.event_buf_size]u8 = undefined,
+    previous_response_len: ?usize = null,
+
+    fn previousResponse(self: *const StepState) ?[]const u8 {
+        const len = self.previous_response_len orelse return null;
+        return self.previous_response_buf[0..len];
+    }
+
+    fn setPreviousResponse(self: *StepState, resp: []const u8) void {
+        @memcpy(self.previous_response_buf[0..resp.len], resp);
+        self.previous_response_len = resp.len;
+    }
+};
+
 fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
     var event_buf: [Ipc.event_buf_size]u8 = undefined;
     var rbuf: [Ipc.event_buf_size]u8 = undefined;
@@ -160,9 +139,54 @@ fn runAuthSequence(
     else
         true;
 
-    var auth_succeeded = expected_user_matches;
+    var step_state = StepState{};
+    const auth_state = try runSteps(
+        ctx,
+        ctx.opts.authenticate_steps,
+        io_reader,
+        io_writer,
+        event_buf,
+        &step_state,
+    );
+    if (auth_state == .cancelled) {
+        return .cancelled;
+    }
 
-    for (ctx.opts.steps) |step| {
+    if (auth_state == .failed or !expected_user_matches) {
+        var failed_result = Ipc.Event{ .pam_auth_result = .{ .ok = false } };
+        try sendEvent(ctx, io_writer, &failed_result);
+        return .failed;
+    }
+
+    const post_auth_state = try runSteps(
+        ctx,
+        ctx.opts.post_auth_steps,
+        io_reader,
+        io_writer,
+        event_buf,
+        &step_state,
+    );
+    if (post_auth_state == .cancelled) {
+        return .cancelled;
+    }
+
+    var result = Ipc.Event{ .pam_auth_result = .{
+        .ok = post_auth_state == .ok,
+    } };
+    try sendEvent(ctx, io_writer, &result);
+
+    return post_auth_state;
+}
+
+fn runSteps(
+    ctx: *Runtime.ServerCtx,
+    steps: []const types.Step,
+    io_reader: *std.Io.Reader,
+    io_writer: *std.Io.Writer,
+    event_buf: []u8,
+    step_state: *StepState,
+) !AuthState {
+    for (steps) |step| {
         switch (step) {
             .pam_message => |info| {
                 var event = Ipc.Event{ .pam_message = info };
@@ -175,20 +199,72 @@ fn runAuthSequence(
                 const response = try ctx.conn.readEvent(io_reader, event_buf);
                 switch (response) {
                     .pam_response => |resp| {
-                        const response_matches = std.mem.eql(u8, resp, challenge.expected_response);
-                        auth_succeeded = auth_succeeded and response_matches;
+                        const response_matches = switch (challenge.expected_response) {
+                            .value => |expected| std.mem.eql(u8, resp, expected),
+                            .any => true,
+                            .expect_previous => blk: {
+                                const expected = step_state.previousResponse() orelse {
+                                    return error.InvalidPreviewConfiguration;
+                                };
+                                break :blk std.mem.eql(u8, resp, expected);
+                            },
+                        };
+                        if (!response_matches) {
+                            try emitFailureMessages(ctx, io_writer, challenge.on_failure);
+                            return .failed;
+                        }
+
+                        step_state.setPreviousResponse(resp);
                     },
                     .login_cancel => return .cancelled,
                     else => return error.UnexpectedPreviewEvent,
                 }
             },
+            .retry_block => |retry| {
+                if (retry.attempts == 0) {
+                    return error.InvalidPreviewConfiguration;
+                }
+
+                var attempt: usize = 0;
+                while (attempt < retry.attempts) : (attempt += 1) {
+                    var attempt_state = step_state.*;
+                    const retry_result = try runSteps(
+                        ctx,
+                        retry.steps,
+                        io_reader,
+                        io_writer,
+                        event_buf,
+                        &attempt_state,
+                    );
+                    switch (retry_result) {
+                        .ok => {
+                            step_state.* = attempt_state;
+                            break;
+                        },
+                        .cancelled => return .cancelled,
+                        .failed => {
+                            if (attempt + 1 == retry.attempts) {
+                                return .failed;
+                            }
+                        },
+                    }
+                }
+            },
         }
     }
 
-    var result = Ipc.Event{ .pam_auth_result = .{ .ok = auth_succeeded } };
-    try sendEvent(ctx, io_writer, &result);
+    return .ok;
+}
 
-    return if (auth_succeeded) .ok else .failed;
+fn emitFailureMessages(
+    ctx: *Runtime.ServerCtx,
+    io_writer: *std.Io.Writer,
+    messages: []const Ipc.PamMessage,
+) !void {
+    for (messages) |message| {
+        var event = Ipc.Event{ .pam_message = message };
+        try sendEvent(ctx, io_writer, &event);
+    }
 }
 
 fn sendEvent(

@@ -64,6 +64,20 @@ pub const PamConvRequest = struct {
 pub const PamMessage = struct {
     is_error: bool,
     message: []const u8,
+
+    pub fn info(msg: []const u8) PamMessage {
+        return .{
+            .is_error = false,
+            .message = msg,
+        };
+    }
+
+    pub fn err(msg: []const u8) PamMessage {
+        return .{
+            .is_error = true,
+            .message = msg,
+        };
+    }
 };
 
 /// PAM response string sent from greeter to zgsld.

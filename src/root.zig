@@ -4,7 +4,9 @@ const fd_utils = @import("fd.zig");
 const logging = @import("logging.zig");
 const session_manager = if (build_options.standalone) @import("manager.zig");
 const worker = if (build_options.standalone) @import("worker.zig");
-const preview = @import("preview.zig");
+const preview_mod = @import("preview.zig");
+
+pub const preview = preview_mod.types;
 
 const log = std.log.scoped(.zgsld);
 
@@ -103,10 +105,11 @@ pub const Zgsld = struct {
         }
     }
 
+
     /// Runs the greeter against a mock IPC daemon.
     pub fn runPreview(self: Zgsld, opts: preview.Options) !void {
-        var ctx: preview.Runtime.ServerCtx = undefined;
-        var runtime = try preview.Runtime.init(&ctx, opts);
+        var ctx: preview_mod.Runtime.ServerCtx = undefined;
+        var runtime = try preview_mod.Runtime.init(&ctx, opts);
         defer runtime.deinit();
 
         try self.vtable.run(.{
