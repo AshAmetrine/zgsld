@@ -74,7 +74,11 @@ pub fn main() !void {
         config.vt = vt;
     }
 
-    const self_exe_path_z: [:0]const u8 = std.mem.span(std.os.argv[0]);
+    var self_exe_path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    const self_exe_path = try std.fs.selfExePath(&self_exe_path_buf);
+    self_exe_path_buf[self_exe_path.len] = 0;
+    const self_exe_path_z = self_exe_path_buf[0..self_exe_path.len :0];
+
     try session_manager.run(.{
         .allocator = allocator,
         .self_exe_path = self_exe_path_z,
