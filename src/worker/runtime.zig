@@ -1,49 +1,11 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
-const SocketPair = @import("../SocketPair.zig");
-const vt_mod = @import("../vt.zig");
 const greeter_mod = @import("runtime/greeter.zig");
-const session_mod = @import("runtime/session.zig");
-const env_mod = @import("runtime/env.zig");
-const pam_mod = @import("pam");
-const pam_conv = @import("runtime/pam_conv.zig");
+const login = @import("runtime/login.zig");
+const signals = @import("runtime/signals.zig");
 const SessionClass = @import("process.zig").SessionClass;
 
-const Pam = pam_mod.Pam;
-const PamCtx = pam_conv.PamCtx;
-
-const log = std.log.scoped(.zgsld_worker);
-
-var shutdown_signal = std.atomic.Value(u8).init(0);
-var active_child_pid = std.atomic.Value(std.posix.pid_t).init(0);
-
 const Greeter = greeter_mod.Greeter;
-const Session = session_mod.Session;
-
-const SessionEnvKey = enum {
-    PATH,
-    XDG_SESSION_DESKTOP,
-    XDG_CURRENT_DESKTOP,
-    XDG_SESSION_TYPE,
-};
-
-fn startSession(
-    allocator: std.mem.Allocator,
-    user: [:0]const u8,
-    info: Ipc.SessionInfo,
-    pam: *Pam(PamCtx),
-    session_envmap: *std.process.EnvMap,
-    vt: ?u8,
-) !Session {
-    try env_mod.applyPamUserSessionEnv(pam, session_envmap, vt);
-    const user_info = try env_mod.applyUserEnv(session_envmap, user);
-    return Session.spawn(allocator, .{
-        .session_info = info,
-        .envmap = session_envmap,
-        .user_info = user_info,
-        .vt = vt,
-    });
-}
 
 pub const WorkerRuntimeOpts = struct {
     allocator: std.mem.Allocator,
@@ -53,13 +15,11 @@ pub const WorkerRuntime = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(opts: WorkerRuntimeOpts) WorkerRuntime {
-        return .{
-            .allocator = opts.allocator,
-        };
+        return .{ .allocator = opts.allocator };
     }
 
     pub fn run(self: *WorkerRuntime) !void {
-        installSignalHandlers();
+        signals.installHandlers();
 
         const argv = std.os.argv;
         if (argv.len < 3) return error.MissingWorkerArgs;
@@ -96,19 +56,21 @@ pub const WorkerRuntime = struct {
                     try greeter.spawn(sock_fd, greeter_cmd, greeter_session_type, vt);
                     break :blk greeter.pid() orelse return error.GreeterSessionMissing;
                 };
-                active_child_pid.store(greeter_pid, .seq_cst);
-                if (shutdownRequested()) {
-                    forwardShutdownSignal(shutdown_signal.load(.seq_cst));
+                signals.setActiveChild(greeter_pid);
+                defer signals.clearActiveChild();
+
+                if (signals.shutdownRequested()) {
+                    signals.forwardShutdownSignal(signals.shutdownSignal());
                 }
                 _ = std.posix.waitpid(greeter_pid, 0);
-                active_child_pid.store(0, .seq_cst);
                 return;
             },
             .user => {
                 var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
                 defer ipc_conn.deinit();
 
-                try self.runIpcLoop(.{
+                try login.run(.{
+                    .allocator = self.allocator,
                     .service_name = service,
                     .ipc_conn = &ipc_conn,
                     .vt = vt,
@@ -116,212 +78,4 @@ pub const WorkerRuntime = struct {
             },
         }
     }
-
-    const RunOpts = struct {
-        service_name: []const u8,
-        ipc_conn: *Ipc.Connection,
-        vt: ?u8,
-    };
-
-    fn runIpcLoop(self: *WorkerRuntime, opts: RunOpts) !void {
-        var event_buf: [Ipc.event_buf_size]u8 = undefined;
-        var rbuf: [Ipc.event_buf_size]u8 = undefined;
-        var wbuf: [Ipc.event_buf_size]u8 = undefined;
-        var saw_auth = false;
-
-        var reader = opts.ipc_conn.reader(&rbuf);
-        var writer = opts.ipc_conn.writer(&wbuf);
-        const ipc_reader = &reader.interface;
-        const ipc_writer = &writer.interface;
-
-        while (true) {
-            log.debug("Waiting for event", .{});
-            const event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
-                if (err == error.EndOfStream and !saw_auth) {
-                    if (shutdownRequested()) return;
-                    std.process.exit(2);
-                }
-                return err;
-            };
-            switch (event) {
-                .login_cancel => {
-                    log.debug("Login cancelled before auth start", .{});
-                    continue;
-                },
-                .pam_start_auth => |auth| {
-                    saw_auth = true;
-                    const user_z = try self.allocator.dupeZ(u8, auth.user);
-                    defer self.allocator.free(user_z);
-
-                    var ctx: PamCtx = .{
-                        .cancelled = false,
-                        .ipc_conn = opts.ipc_conn,
-                        .reader = ipc_reader,
-                        .writer = ipc_writer,
-                    };
-                    var pam_state: Pam(PamCtx).ConvState = .{
-                        .conv = pam_conv.loginConv,
-                        .ctx = &ctx,
-                    };
-                    var pam = try Pam(PamCtx).init(self.allocator, .{
-                        .service_name = opts.service_name,
-                        .user = user_z,
-                        .state = &pam_state,
-                    });
-                    defer pam.deinit();
-
-                    var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                    const tty_z: [:0]const u8 = blk: {
-                        if (opts.vt) |vt_num| {
-                            if (vt_mod.getTtyPath(&tty_path_buf, vt_num)) |tty_path| {
-                                break :blk tty_path;
-                            } else |err| {
-                                log.warn("Failed to resolve configured VT path for PAM_TTY: {s}", .{@errorName(err)});
-                            }
-                        }
-
-                        if (vt_mod.getInheritedTtyPath(&tty_path_buf)) |tty_path| {
-                            break :blk tty_path;
-                        } else |err| {
-                            log.warn("Failed to resolve inherited TTY path for PAM_TTY: {s}", .{@errorName(err)});
-                        }
-
-                        if (vt_mod.getCurrentTtyPath(&tty_path_buf)) |tty_path| {
-                            if (std.mem.eql(u8, tty_path, "/dev/tty")) {
-                                log.err("Refusing to set PAM_TTY to /dev/tty alias", .{});
-                                return error.InvalidPamTty;
-                            }
-                            break :blk tty_path;
-                        } else |err| {
-                            log.err("Failed to resolve current TTY path for PAM_TTY: {s}", .{@errorName(err)});
-                            return error.InvalidPamTty;
-                        }
-                    };
-                    try pam.setItem(.{ .tty = tty_z });
-
-                    pam.authenticate(.{}) catch {
-                        if (ctx.cancelled) {
-                            log.debug("Pam auth cancelled", .{});
-                            continue;
-                        }
-
-                        const fail = Ipc.Event{ .pam_auth_result = .{ .ok = false } };
-                        opts.ipc_conn.writeEvent(ipc_writer, &fail) catch {};
-                        ipc_writer.flush() catch {};
-                        continue;
-                    };
-                    try pam.accountMgmt(.{});
-                    try pam.setCred(.{ .action = .establish });
-
-                    const ok = Ipc.Event{ .pam_auth_result = .{ .ok = true } };
-                    try opts.ipc_conn.writeEvent(ipc_writer, &ok);
-                    try ipc_writer.flush();
-
-                    var session_envmap = std.process.EnvMap.init(self.allocator);
-                    errdefer session_envmap.deinit();
-
-                    while (true) {
-                        const session_event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
-                            if (err == error.EndOfStream and shutdownRequested()) {
-                                std.process.exit(0);
-                            }
-                            return err;
-                        };
-                        switch (session_event) {
-                            .login_cancel => {
-                                log.debug("Login cancelled before session start", .{});
-                                session_envmap.deinit();
-                                break;
-                            },
-                            .set_session_env => |env| {
-                                // Ignore unexpected env vars
-                                if (std.meta.stringToEnum(SessionEnvKey, env.key) == null) continue;
-                                try session_envmap.put(env.key, env.value);
-                            },
-                            .start_session => |info| {
-                                log.debug("Waiting for greeter exit before starting session...", .{});
-                                if (shutdownRequested()) return;
-
-                                log.debug("Starting session...", .{});
-
-                                var session = blk: {
-                                    defer session_envmap.deinit();
-                                    break :blk try startSession(self.allocator, user_z, info, &pam, &session_envmap, opts.vt);
-                                };
-
-                                defer session.deinit();
-
-                                log.debug("Waiting for session to end...", .{});
-                                const session_pid = session.pid;
-                                active_child_pid.store(session_pid, .seq_cst);
-                                if (shutdownRequested()) {
-                                    forwardShutdownSignal(shutdown_signal.load(.seq_cst));
-                                }
-                                _ = std.posix.waitpid(session_pid, 0);
-                                active_child_pid.store(0, .seq_cst);
-                                return;
-                            },
-                            else => unreachable,
-                        }
-                    }
-                    break;
-                },
-                else => unreachable,
-            }
-        }
-    }
 };
-
-// Signal Handling
-
-fn shutdownRequested() bool {
-    return shutdown_signal.load(.seq_cst) != 0;
-}
-
-fn installSignalHandlers() void {
-    const sigact = std.posix.Sigaction{
-        .handler = .{ .handler = handleShutdownSignal },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    };
-
-    const forward_signals = [_]u8{
-        std.posix.SIG.TERM,
-        std.posix.SIG.HUP,
-        std.posix.SIG.QUIT,
-    };
-
-    for (forward_signals) |sig| {
-        std.posix.sigaction(sig, &sigact, null);
-    }
-
-    const alarm_sigact = std.posix.Sigaction{
-        .handler = .{ .handler = handleKillTimeout },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    };
-    std.posix.sigaction(std.posix.SIG.ALRM, &alarm_sigact, null);
-}
-
-fn forwardShutdownSignal(sig: u8) void {
-    const child_pid = active_child_pid.load(.seq_cst);
-    if (child_pid > 0) {
-        std.posix.kill(child_pid, sig) catch {};
-    }
-    // 5s timeout until sigkill
-    _ = std.c.alarm(5);
-}
-
-fn handleShutdownSignal(sig: i32) callconv(.c) void {
-    const sig_u8: u8 = @intCast(sig);
-    shutdown_signal.store(sig_u8, .seq_cst);
-    forwardShutdownSignal(sig_u8);
-}
-
-fn handleKillTimeout(_: i32) callconv(.c) void {
-    if (!shutdownRequested()) return;
-    const child_pid = active_child_pid.load(.seq_cst);
-    if (child_pid > 0) {
-        std.posix.kill(child_pid, std.posix.SIG.KILL) catch {};
-    }
-}

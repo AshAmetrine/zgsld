@@ -37,6 +37,11 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    const vt_mod = b.createModule(.{
+        .root_source_file = b.path("src/vt.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const zgsld_mod = b.addModule("zgsld", .{
         .root_source_file = b.path("src/root.zig"),
@@ -46,6 +51,7 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "build_options", .module = build_options_mod },
             .{ .name = "Ipc", .module = ipc_mod },
             .{ .name = "pam", .module = pam.module("pam") },
+            .{ .name = "vt", .module = vt_mod },
         },
     });
 
@@ -86,6 +92,7 @@ pub fn build(b: *std.Build) !void {
                 .{ .name = "Ipc", .module = ipc_mod },
                 .{ .name = "zigini", .module = zigini.module("zigini") },
                 .{ .name = "pam", .module = pam.module("pam") },
+                .{ .name = "vt", .module = vt_mod },
             },
             .link_libc = true,
         }),

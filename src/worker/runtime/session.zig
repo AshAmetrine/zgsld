@@ -1,10 +1,14 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const tty = @import("tty.zig");
+const env_mod = @import("env.zig");
 const build_options = @import("build_options");
 const x11 = if (build_options.x11_support) @import("session/x11.zig");
 const utils = @import("user.zig");
+const pam_mod = @import("pam");
+const PamCtx = @import("pam_conv.zig").PamCtx;
 const UserInfo = utils.UserInfo;
+const Pam = pam_mod.Pam;
 
 const log = std.log.scoped(.zgsld_worker);
 
@@ -12,6 +16,24 @@ const X11Setup = struct {
     display: u8,
     xauth_path: [:0]const u8,
 };
+
+pub fn start(
+    allocator: std.mem.Allocator,
+    user: [:0]const u8,
+    info: Ipc.SessionInfo,
+    pam: *Pam(PamCtx),
+    session_envmap: *std.process.EnvMap,
+    vt: ?u8,
+) !Session {
+    try env_mod.applyPamUserSessionEnv(pam, session_envmap, vt);
+    const user_info = try env_mod.applyUserEnv(session_envmap, user);
+    return Session.spawn(allocator, .{
+        .session_info = info,
+        .envmap = session_envmap,
+        .user_info = user_info,
+        .vt = vt,
+    });
+}
 
 pub const Session = struct {
     pid: std.posix.pid_t,
