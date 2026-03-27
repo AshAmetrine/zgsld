@@ -89,6 +89,7 @@ pub fn run(opts: RunOpts) !void {
                 opts.ipc_conn.deinit();
                 ipc_closed = true;
                 try runSession(opts.allocator, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
+                return;
             },
             else => unreachable,
         }
@@ -105,16 +106,27 @@ fn authenticate(
             return false;
         }
 
-        try pam_ctx.ipc_conn.writeEvent(pam_ctx.writer, &.{ .pam_auth_result = .{ .ok = false } });
-        try pam_ctx.writer.flush();
+        try writeAuthResult(pam_ctx, false);
         return false;
     };
-    try pam.accountMgmt(.{});
-    try pam.setCred(.{ .action = .establish });
+    pam.accountMgmt(.{}) catch |err| {
+        log.debug("Pam account management failed: {s}", .{@errorName(err)});
+        try writeAuthResult(pam_ctx, false);
+        return false;
+    };
+    pam.setCred(.{ .action = .establish }) catch |err| {
+        log.debug("Pam credential establishment failed: {s}", .{@errorName(err)});
+        try writeAuthResult(pam_ctx, false);
+        return false;
+    };
 
-    try pam_ctx.ipc_conn.writeEvent(pam_ctx.writer, &.{ .pam_auth_result = .{ .ok = true } });
-    try pam_ctx.writer.flush();
+    try writeAuthResult(pam_ctx, true);
     return true;
+}
+
+fn writeAuthResult(pam_ctx: *PamCtx, ok: bool) !void {
+    try pam_ctx.ipc_conn.writeEvent(pam_ctx.writer, &.{ .pam_auth_result = .{ .ok = ok } });
+    try pam_ctx.writer.flush();
 }
 
 fn getSession(
