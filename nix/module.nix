@@ -31,7 +31,7 @@ let
     };
   }
   // lib.optionalAttrs (x11Support) {
-    sections.x11.cmd = x11Command;
+    sections.x11.command = x11Command;
   };
 
   finalConfig = lib.recursiveUpdate defaultConfig cfg.settings;
