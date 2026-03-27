@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const fd_utils = @import("../fd.zig");
 const greeter_mod = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
@@ -66,9 +67,9 @@ pub const WorkerRuntime = struct {
                 return;
             },
             .user => {
-                var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
-                defer ipc_conn.deinit();
+                try fd_utils.setCloseOnExec(sock_fd);
 
+                var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
                 try login.run(.{
                     .allocator = self.allocator,
                     .service_name = service,

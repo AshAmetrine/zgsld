@@ -1,5 +1,6 @@
 const std = @import("std");
 const build_options = @import("build_options");
+const fd_utils = @import("fd.zig");
 const logging = @import("logging.zig");
 const session_manager = if (build_options.standalone) @import("manager.zig");
 const worker = if (build_options.standalone) @import("worker.zig");
@@ -81,6 +82,8 @@ pub const Zgsld = struct {
         }
 
         if (sock_fd) |fd| {
+            try fd_utils.setCloseOnExec(fd);
+
             var ipc_conn = IpcConnection.initFromFd(fd);
             defer ipc_conn.deinit();
 

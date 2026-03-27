@@ -31,6 +31,9 @@ const SessionSetup = struct {
 };
 
 pub fn run(opts: RunOpts) !void {
+    var ipc_closed = false;
+    defer if (!ipc_closed) opts.ipc_conn.deinit();
+
     var saw_auth = false;
     var event_buf: [Ipc.event_buf_size]u8 = undefined;
     var rbuf: [Ipc.event_buf_size]u8 = undefined;
@@ -83,6 +86,8 @@ pub fn run(opts: RunOpts) !void {
 
                 var session_setup = try getSession(opts.allocator, opts.ipc_conn, ipc_reader, &event_buf) orelse continue;
                 if (signals.shutdownRequested()) return;
+                opts.ipc_conn.deinit();
+                ipc_closed = true;
                 try runSession(opts.allocator, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
             },
             else => unreachable,
