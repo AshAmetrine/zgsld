@@ -110,9 +110,27 @@ fn authenticate(
         return false;
     };
     pam.accountMgmt(.{}) catch |err| {
-        log.debug("Pam account management failed: {s}", .{@errorName(err)});
-        try writeAuthResult(pam_ctx, false);
-        return false;
+        switch (err) {
+            error.NewAuthTokenRequired => {
+                log.debug("Pam auth token update required", .{});
+                pam.changeAuthToken(.{ .change_expired_authtok = true }) catch |change_err| {
+                    if (pam_ctx.cancelled) {
+                        log.debug("Pam auth token update cancelled", .{});
+                        return false;
+                    }
+
+                    log.debug("Pam auth token update failed: {s}", .{@errorName(change_err)});
+                    try writeAuthResult(pam_ctx, false);
+                    return false;
+                };
+            },
+            else => {
+                log.debug("Pam account management failed: {s}", .{@errorName(err)});
+                try writeAuthResult(pam_ctx, false);
+                return false;
+            }
+        }
+
     };
     pam.setCred(.{ .action = .establish }) catch |err| {
         log.debug("Pam credential establishment failed: {s}", .{@errorName(err)});
