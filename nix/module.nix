@@ -129,7 +129,7 @@ in
       restartIfChanged = false;
       conflicts = [ "getty@tty${toString cfg.vt}.service" ];
       serviceConfig = {
-        Type = "simple";
+        Type = "idle";
         ExecStart = "${lib.getExe cfg.package} --config ${iniFmt.generate "zgsld.ini" finalConfig}";
         Restart = "on-failure";
         RestartSec = "1s";

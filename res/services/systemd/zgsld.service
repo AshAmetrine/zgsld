@@ -1,0 +1,15 @@
+[Unit]
+Description=Zig Greeter and Session Launcher Daemon
+# Adjust tty1 if your zgsld.ini uses a different VT.
+After=systemd-user-sessions.service getty@tty1.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=idle
+ExecStart=/usr/local/bin/zgsld --config /etc/zgsld/zgsld.ini
+Restart=on-failure
+RestartSec=1s
+
+[Install]
+WantedBy=multi-user.target
+Alias=display-manager.service
