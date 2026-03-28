@@ -1,0 +1,14 @@
+# Example PAM service for zgsld user logins on Linux.
+#
+# Install as /etc/pam.d/zgsld and set:
+#   [session]
+#   service_name = zgsld
+#
+# This example defers to the system's normal login policy, which works
+# well on many hosts because it tracks the local PAM stack used for tty
+# logins.
+
+auth      include   login
+account   include   login
+password  include   login
+session   include   login
