@@ -8,6 +8,7 @@ const log = std.log.scoped(.zgsld);
 pub const SessionClass = enum {
     user,
     greeter,
+    autologin,
 };
 
 pub const WorkerProcess = struct {
@@ -19,21 +20,13 @@ pub const WorkerProcess = struct {
         greeter_cmd: if (build_options.standalone) []const u8 else void,
         config: Config,
         session_class: SessionClass,
-        ipc_fd: std.posix.fd_t,
+        ipc_fd: ?std.posix.fd_t,
     };
 
     pub fn spawn(opts: SpawnOpts) !WorkerProcess {
         var arena = std.heap.ArenaAllocator.init(opts.allocator);
         defer arena.deinit();
         const arena_allocator = arena.allocator();
-
-        const greeter_cmd_str: []const u8 = if (build_options.standalone) blk: {
-            if (opts.greeter_cmd.len == 0) return error.NullGreeterCmd;
-            break :blk opts.greeter_cmd;
-        } else if (opts.config.greeter.command) |cmd| blk: {
-            if (cmd.len == 0) return error.NullGreeterCmd;
-            break :blk cmd;
-        } else return error.NullGreeterCmd;
 
         var worker_envmap = std.process.EnvMap.init(arena_allocator);
         defer worker_envmap.deinit();
@@ -49,27 +42,52 @@ pub const WorkerProcess = struct {
         if (build_options.x11_support) {
             try worker_envmap.put("ZGSLD_X11_CMD", opts.config.x11.command);
         }
-        try worker_envmap.put(
-            "ZGSLD_GREETER_SESSION_TYPE",
-            @tagName(opts.config.greeter.session_type),
-        );
-        try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd_str);
-
-        var fd_buf: [16]u8 = undefined;
-        const zgsld_sock = try std.fmt.bufPrint(&fd_buf, "{d}", .{opts.ipc_fd});
-        try worker_envmap.put("ZGSLD_SOCK", zgsld_sock);
-
-        const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
 
         const service_name = switch (opts.session_class) {
             .greeter => opts.config.greeter.service_name,
-            .user => opts.config.session.service_name,
+            .user, .autologin => opts.config.session.service_name,
         };
 
-        var greeter_user_z: ?[*:0]const u8 = null;
-        if (opts.session_class == .greeter) {
-            greeter_user_z = try arena_allocator.dupeZ(u8, opts.config.greeter.user);
+        if (opts.session_class != .autologin) {
+            const ipc_fd = opts.ipc_fd orelse return error.MissingIpcFd;
+            var fd_buf: [16]u8 = undefined;
+            const zgsld_sock = try std.fmt.bufPrint(&fd_buf, "{d}", .{ipc_fd});
+            try worker_envmap.put("ZGSLD_SOCK", zgsld_sock);
         }
+
+        var greeter_user_z: ?[*:0]const u8 = null;
+        switch (opts.session_class) {
+            .greeter => {
+                const greeter_cmd_str: []const u8 = if (build_options.standalone) blk: {
+                    if (opts.greeter_cmd.len == 0) return error.NullGreeterCmd;
+                    break :blk opts.greeter_cmd;
+                } else if (opts.config.greeter.command) |cmd| blk: {
+                    if (cmd.len == 0) return error.NullGreeterCmd;
+                    break :blk cmd;
+                } else return error.NullGreeterCmd;
+
+                try worker_envmap.put(
+                    "ZGSLD_GREETER_SESSION_TYPE",
+                    @tagName(opts.config.greeter.session_type),
+                );
+                try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd_str);
+                greeter_user_z = try arena_allocator.dupeZ(u8, opts.config.greeter.user);
+            },
+            .autologin => {
+                const autologin_user = opts.config.autologin.user orelse return error.NullAutologinUser;
+                if (autologin_user.len == 0) return error.NullAutologinUser;
+
+                const autologin_cmd = opts.config.autologin.command orelse return error.NullAutologinCmd;
+                if (autologin_cmd.len == 0) return error.NullAutologinCmd;
+
+                try worker_envmap.put("ZGSLD_AUTOLOGIN_USER", autologin_user);
+                try worker_envmap.put("ZGSLD_AUTOLOGIN_SESSION_TYPE", @tagName(opts.config.autologin.session_type));
+                try worker_envmap.put("ZGSLD_AUTOLOGIN_CMD", autologin_cmd);
+            },
+            .user => {},
+        }
+
+        const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
 
         const service_name_z = try arena_allocator.dupeZ(u8, service_name);
 

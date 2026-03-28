@@ -105,7 +105,6 @@ pub const Zgsld = struct {
         }
     }
 
-
     /// Runs the greeter against a mock IPC daemon.
     pub fn runPreview(self: Zgsld, opts: preview.Options) !void {
         var ctx: preview_mod.Runtime.ServerCtx = undefined;

@@ -63,18 +63,19 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         return error.GreeterUserNotFound;
     }
 
-    while (true) {
-        defer {
-            if (opts.config.vt) |vt_id| {
-                vt.resetTty(vt_id) catch {};
-            }
-            vt.resetTermios();
-        }
+    const run_autologin = try shouldRunAutologin(opts.config);
+    if (run_autologin) {
+        defer cleanupControllingTty(opts.config.vt);
         if (shutdown_requested.load(.seq_cst) != 0) return;
+        prepareControllingTty(opts.config.vt);
+        try runAutologin(opts);
+        if (shutdown_requested.load(.seq_cst) != 0) return;
+    }
 
-        vt.restoreControllingTty(opts.config.vt) catch |err| {
-            log.warn("Failed to restore controlling TTY before spawning workers: {s}", .{@errorName(err)});
-        };
+    while (true) {
+        defer cleanupControllingTty(opts.config.vt);
+        if (shutdown_requested.load(.seq_cst) != 0) return;
+        prepareControllingTty(opts.config.vt);
 
         const greeter_cmd = if (build_options.standalone) opts.greeter_cmd else {};
         const spawned = try spawnWorkers(.{
@@ -86,8 +87,8 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
         session_worker_pid.store(spawned.session_proc.pid, .seq_cst);
         greeter_worker_pid.store(spawned.greeter_proc.pid, .seq_cst);
-        defer terminateAndReapWorkerIfRunning(&session_worker_pid);
-        defer terminateAndReapWorkerIfRunning(&greeter_worker_pid);
+        defer terminateWorkerAndClearPid(&session_worker_pid);
+        defer terminateWorkerAndClearPid(&greeter_worker_pid);
 
         if (shutdown_requested.load(.seq_cst) != 0) {
             std.posix.kill(spawned.greeter_proc.pid, std.posix.SIG.TERM) catch {};
@@ -152,6 +153,113 @@ fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     };
 }
 
+fn runAutologin(opts: SessionManagerRunOpts) !void {
+    const autologin = opts.config.autologin;
+
+    if (autologin.timeout_seconds != 0) {
+        var watcher = vt.ControllingTtyInputWatcher.init() catch |err| {
+            if (shutdown_requested.load(.seq_cst) != 0) return;
+            log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
+            return;
+        };
+        defer watcher.deinit();
+
+        var remaining = autologin.timeout_seconds;
+        while (remaining > 0) : (remaining -= 1) {
+            writeAutologinCountdown(remaining);
+
+            const interrupted = watcher.waitForInput(std.time.ms_per_s) catch |err| {
+                clearAutologinCountdown();
+                if (shutdown_requested.load(.seq_cst) != 0) return;
+                log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
+                return;
+            };
+            if (shutdown_requested.load(.seq_cst) != 0) {
+                clearAutologinCountdown();
+                return;
+            }
+            if (interrupted) {
+                clearAutologinCountdown();
+                log.debug("Autologin interrupted; starting greeter", .{});
+                return;
+            }
+        }
+        clearAutologinCountdown();
+    }
+
+    if (shutdown_requested.load(.seq_cst) != 0) return;
+
+    const autologin_proc = try spawnAutologinWorker(.{
+        .allocator = opts.allocator,
+        .worker_path = opts.self_exe_path,
+        .config = opts.config,
+    });
+
+    session_worker_pid.store(autologin_proc.pid, .seq_cst);
+    defer terminateWorkerAndClearPid(&session_worker_pid);
+
+    if (shutdown_requested.load(.seq_cst) != 0) {
+        std.posix.kill(autologin_proc.pid, std.posix.SIG.TERM) catch {};
+    }
+
+    waitWorkerAndClearPid(&session_worker_pid, autologin_proc) catch |err| {
+        log.warn("Autologin failed: {s}", .{@errorName(err)});
+        return;
+    };
+}
+
+const SpawnAutologinWorkerOpts = struct {
+    allocator: std.mem.Allocator,
+    worker_path: [:0]const u8,
+    config: Config,
+};
+
+fn spawnAutologinWorker(opts: SpawnAutologinWorkerOpts) !worker.WorkerProcess {
+    log.debug("Spawning Autologin worker...", .{});
+    const greeter_cmd = if (build_options.standalone) "" else {};
+    return worker.WorkerProcess.spawn(.{
+        .allocator = opts.allocator,
+        .worker_path = opts.worker_path,
+        .greeter_cmd = greeter_cmd,
+        .config = opts.config,
+        .session_class = .autologin,
+        .ipc_fd = null,
+    });
+}
+
+fn prepareControllingTty(vt_num: ?u8) void {
+    vt.restoreControllingTty(vt_num) catch |err| {
+        log.warn("Failed to restore controlling TTY before spawning workers: {s}", .{@errorName(err)});
+    };
+}
+
+fn cleanupControllingTty(vt_num: ?u8) void {
+    if (vt_num) |vt_id| {
+        vt.resetTty(vt_id) catch {};
+    }
+    vt.resetTermios();
+}
+
+fn writeAutologinCountdown(remaining_seconds: u64) void {
+    var tty_file = std.fs.openFileAbsolute("/dev/tty", .{ .mode = .write_only }) catch return;
+    defer tty_file.close();
+
+    var buf: [128]u8 = undefined;
+    const msg = std.fmt.bufPrint(
+        &buf,
+        "\rLaunching session in {d}... (Press any key to interrupt)\x1b[K",
+        .{remaining_seconds},
+    ) catch return;
+    _ = std.posix.write(tty_file.handle, msg) catch return;
+}
+
+fn clearAutologinCountdown() void {
+    var tty_file = std.fs.openFileAbsolute("/dev/tty", .{ .mode = .write_only }) catch return;
+    defer tty_file.close();
+
+    _ = std.posix.write(tty_file.handle, "\r\x1b[K") catch return;
+}
+
 pub fn forwardIpc(
     greeter_fd: std.posix.fd_t,
     worker_fd: std.posix.fd_t,
@@ -212,7 +320,7 @@ fn waitWorkerAndClearPid(
     pid_slot.store(0, .seq_cst);
 }
 
-fn terminateAndReapWorkerIfRunning(pid_slot: *std.atomic.Value(std.posix.pid_t)) void {
+fn terminateWorkerAndClearPid(pid_slot: *std.atomic.Value(std.posix.pid_t)) void {
     const pid = pid_slot.load(.seq_cst);
     if (pid <= 0) return;
     std.posix.kill(pid, std.posix.SIG.TERM) catch {};
@@ -283,8 +391,41 @@ fn forwardSignalToWorker(sig: i32) callconv(.c) void {
     }
 }
 
+fn shouldRunAutologin(config: Config) !bool {
+    if (!autologinEnabled(config)) return false;
+
+    const autologin = config.autologin;
+    const autologin_user = autologin.user.?;
+
+    if (!build_options.x11_support and autologin.session_type == .x11) {
+        log.warn("Autologin X11 session type requested, but zgsld was built without -Dx11 support; starting greeter instead", .{});
+        return false;
+    }
+
+    if (!try userExists(autologin_user)) {
+        log.warn("Autologin user not found: {s}; starting greeter instead", .{autologin_user});
+        return false;
+    }
+
+    const autologin_cmd = autologin.command orelse {
+        log.warn("Autologin command is unset; starting greeter instead", .{});
+        return false;
+    };
+    if (autologin_cmd.len == 0) {
+        log.warn("Autologin command is empty; starting greeter instead", .{});
+        return false;
+    }
+
+    return true;
+}
+
 fn userExists(user: []const u8) !bool {
     var user_buf: [64]u8 = undefined;
     const user_z = try std.fmt.bufPrintZ(&user_buf, "{s}", .{user});
     return std.c.getpwnam(user_z) != null;
+}
+
+fn autologinEnabled(config: Config) bool {
+    const user = config.autologin.user orelse return false;
+    return user.len != 0;
 }

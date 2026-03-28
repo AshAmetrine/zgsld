@@ -1,10 +1,10 @@
 const std = @import("std");
-const UserInfo = @import("user.zig").UserInfo;
 const Pam = @import("pam").Pam;
-const PamCtx = @import("pam_conv.zig").PamCtx;
+const UserInfo = @import("user.zig").UserInfo;
 
 pub fn applyPamUserSessionEnv(
-    pam: *Pam(PamCtx),
+    comptime T: type,
+    pam: *Pam(T),
     session_envmap: *std.process.EnvMap,
     vt: ?u8,
 ) !void {

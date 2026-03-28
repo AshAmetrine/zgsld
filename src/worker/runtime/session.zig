@@ -7,8 +7,8 @@ const x11 = if (build_options.x11_support) @import("session/x11.zig");
 const utils = @import("user.zig");
 const pam_mod = @import("pam");
 const PamCtx = @import("pam_conv.zig").PamCtx;
-const UserInfo = utils.UserInfo;
 const Pam = pam_mod.Pam;
+const UserInfo = utils.UserInfo;
 
 const log = std.log.scoped(.zgsld_worker);
 
@@ -25,7 +25,7 @@ pub fn start(
     session_envmap: *std.process.EnvMap,
     vt: ?u8,
 ) !Session {
-    try env_mod.applyPamUserSessionEnv(pam, session_envmap, vt);
+    try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, vt);
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
         .session_info = info,

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const fd_utils = @import("../fd.zig");
+const autologin = @import("runtime/autologin.zig");
 const greeter_mod = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
@@ -35,12 +36,9 @@ pub const WorkerRuntime = struct {
             break :blk try std.fmt.parseInt(u8, vt_str, 10);
         } else null;
 
-        const sock_fd = if (std.posix.getenv("ZGSLD_SOCK")) |fd| blk: {
-            break :blk try std.fmt.parseInt(std.posix.fd_t, fd, 10);
-        } else return error.MissingZgsldSock;
-
         switch (session_class) {
             .greeter => {
+                const sock_fd = try parseZgsldSock();
                 const greeter_username = std.mem.span(argv[4]);
                 const greeter_cmd = std.posix.getenv("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
                 const greeter_session_type_raw = std.posix.getenv("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
@@ -67,6 +65,7 @@ pub const WorkerRuntime = struct {
                 return;
             },
             .user => {
+                const sock_fd = try parseZgsldSock();
                 try fd_utils.setCloseOnExec(sock_fd);
 
                 var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
@@ -77,6 +76,31 @@ pub const WorkerRuntime = struct {
                     .vt = vt,
                 });
             },
+            .autologin => {
+                const autologin_user = std.posix.getenv("ZGSLD_AUTOLOGIN_USER") orelse return error.MissingAutologinUser;
+                const autologin_session_type_raw = std.posix.getenv("ZGSLD_AUTOLOGIN_SESSION_TYPE") orelse return error.MissingAutologinSessionType;
+                const autologin_session_type = std.meta.stringToEnum(Ipc.SessionType, autologin_session_type_raw) orelse return error.InvalidAutologinSessionType;
+                const autologin_cmd = std.posix.getenv("ZGSLD_AUTOLOGIN_CMD") orelse return error.MissingAutologinCmd;
+
+                try autologin.run(.{
+                    .allocator = self.allocator,
+                    .service_name = service,
+                    .user = autologin_user,
+                    .info = .{
+                        .session_type = autologin_session_type,
+                        .command = .{
+                            .session_cmd = autologin_cmd,
+                            .source_profile = true,
+                        },
+                    },
+                    .vt = vt,
+                });
+            },
         }
     }
 };
+
+fn parseZgsldSock() !std.posix.fd_t {
+    const fd = std.posix.getenv("ZGSLD_SOCK") orelse return error.MissingZgsldSock;
+    return try std.fmt.parseInt(std.posix.fd_t, fd, 10);
+}

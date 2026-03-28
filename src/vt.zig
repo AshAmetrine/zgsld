@@ -65,6 +65,57 @@ pub fn restoreControllingTty(target_vt: ?u8) !void {
     try attachControllingTty(tty_file.handle);
 }
 
+pub const ControllingTtyInputWatcher = struct {
+    file: std.fs.File,
+    original: std.posix.termios,
+
+    pub fn init() !ControllingTtyInputWatcher {
+        var tty_file = try openCurrentTty(.read_write);
+        errdefer tty_file.close();
+
+        const original = try std.posix.tcgetattr(tty_file.handle);
+        var raw = original;
+        raw.lflag.ICANON = false;
+        raw.lflag.ECHO = false;
+        raw.lflag.ECHONL = false;
+        raw.lflag.ISIG = false;
+        raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
+        raw.cc[@intFromEnum(std.posix.V.TIME)] = 0;
+        try std.posix.tcsetattr(tty_file.handle, .FLUSH, raw);
+
+        return .{
+            .file = tty_file,
+            .original = original,
+        };
+    }
+
+    pub fn deinit(self: *ControllingTtyInputWatcher) void {
+        std.posix.tcsetattr(self.file.handle, .FLUSH, self.original) catch {};
+        self.file.close();
+    }
+
+    pub fn waitForInput(self: *ControllingTtyInputWatcher, timeout_ms: u64) !bool {
+        var poll_fds = [1]std.posix.pollfd{.{
+            .fd = self.file.handle,
+            .events = std.posix.POLL.IN,
+            .revents = 0,
+        }};
+        const timeout: i32 = std.math.cast(i32, timeout_ms) orelse std.math.maxInt(i32);
+        const ready = try std.posix.poll(&poll_fds, timeout);
+        return ready != 0 and (poll_fds[0].revents & std.posix.POLL.IN) != 0;
+    }
+};
+
+pub fn waitForControllingTtyInput(timeout_seconds: u64) !bool {
+    if (timeout_seconds == 0) return false;
+
+    var watcher = try ControllingTtyInputWatcher.init();
+    defer watcher.deinit();
+
+    const timeout_ms_u64 = std.math.mul(u64, timeout_seconds, std.time.ms_per_s) catch std.math.maxInt(u64);
+    return watcher.waitForInput(timeout_ms_u64);
+}
+
 pub fn getCurrentTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     var tty_file = try openCurrentTty(.read_only);
     defer tty_file.close();

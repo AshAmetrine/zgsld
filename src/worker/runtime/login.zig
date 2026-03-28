@@ -128,9 +128,8 @@ fn authenticate(
                 log.debug("Pam account management failed: {s}", .{@errorName(err)});
                 try writeAuthResult(pam_ctx, false);
                 return false;
-            }
+            },
         }
-
     };
     pam.setCred(.{ .action = .establish }) catch |err| {
         log.debug("Pam credential establishment failed: {s}", .{@errorName(err)});
