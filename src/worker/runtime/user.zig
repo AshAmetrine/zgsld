@@ -20,23 +20,30 @@ pub fn dropPrivileges(user_info: UserInfo) !void {
     try std.posix.setuid(user_info.uid);
 }
 
-pub fn ensureDirOwned(
-    path: []const u8,
+pub fn ensureOwnedDirAt(
+    parent: std.fs.Dir,
+    name: []const u8,
     mode: u32,
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
-) !void {
-    std.posix.mkdir(path, mode) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
+) !std.fs.Dir {
+    const created = blk: {
+        parent.makeDir(name) catch |err| switch (err) {
+            error.PathAlreadyExists => break :blk false,
+            else => return err,
+        };
+        break :blk true;
     };
 
-    var dir = try std.fs.openDirAbsolute(path, .{});
-    defer dir.close();
+    var dir = try parent.openDir(name, .{ .no_follow = true });
+    errdefer dir.close();
 
     const stat = try std.posix.fstat(dir.fd);
-    if (stat.uid != uid or stat.gid != gid) {
+    if (created) {
         try dir.chown(uid, gid);
+    } else if (stat.uid != uid or stat.gid != gid) {
+        return error.UnsafePathOwnership;
     }
     try dir.chmod(mode);
+    return dir;
 }

@@ -30,6 +30,11 @@ const Xauth = struct {
     }
 };
 
+const XauthRootDir = struct {
+    path: []const u8,
+    dir: std.fs.Dir,
+};
+
 fn mcookie() [Md5.digest_length]u8 {
     var buf: [4096]u8 = undefined;
     std.crypto.random.bytes(&buf);
@@ -75,37 +80,47 @@ pub fn createXauthEntry(
     return xauth_file.path;
 }
 
-const XauthDir = struct {
-    path: []const u8,
-    file: std.fs.File,
-};
-
-fn dirExists(path: []const u8) bool {
-    var dir = std.fs.openDirAbsolute(path, .{}) catch return false;
-    dir.close();
-    return true;
-}
-
 fn resolveXauthDir(
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
     user_dir_buf: []u8,
     runtime_dir_opt: ?[]const u8,
-) ![]const u8 {
+) !XauthRootDir {
     if (runtime_dir_opt) |runtime_dir_raw| {
         const runtime_dir = std.mem.trimRight(u8, runtime_dir_raw, "/");
-        if (runtime_dir.len != 0 and dirExists(runtime_dir)) {
-            return runtime_dir;
+        if (runtime_dir.len != 0) {
+            if (std.fs.openDirAbsolute(runtime_dir, .{ .no_follow = true })) |dir| {
+                return .{
+                    .path = runtime_dir,
+                    .dir = dir,
+                };
+            } else |_| {}
         }
     }
 
     const base_dir = "/tmp/zgsld";
-    try utils.ensureDirOwned(base_dir, 0o755, 0, 0);
+    var tmp_dir = try std.fs.openDirAbsolute("/tmp", .{ .no_follow = true });
+    defer tmp_dir.close();
 
-    const user_dir = try std.fmt.bufPrint(user_dir_buf, "{s}/{d}", .{ base_dir, uid });
-    try utils.ensureDirOwned(user_dir, 0o700, uid, gid);
-    return user_dir;
+    var base = try utils.ensureOwnedDirAt(tmp_dir, "zgsld", 0o755, 0, 0);
+    defer base.close();
+
+    var user_dir_name_buf: [32]u8 = undefined;
+    const user_dir_name = try std.fmt.bufPrint(&user_dir_name_buf, "{d}", .{uid});
+    const user_dir = try utils.ensureOwnedDirAt(base, user_dir_name, 0o700, uid, gid);
+    errdefer user_dir.close();
+
+    const user_dir_path = try std.fmt.bufPrint(user_dir_buf, "{s}/{s}", .{ base_dir, user_dir_name });
+    return .{
+        .path = user_dir_path,
+        .dir = user_dir,
+    };
 }
+
+const CreatedXauthFile = struct {
+    path: []const u8,
+    file: std.fs.File,
+};
 
 /// Finds a suitable dir to store the Xauth file,
 /// then creates the file with a unique id.
@@ -114,21 +129,20 @@ fn createUniqueXauthFile(
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
     runtime_dir: ?[]const u8,
-) !XauthDir {
+) !CreatedXauthFile {
     var base_buf: [std.fs.max_path_bytes]u8 = undefined;
     const xauth_dir = try resolveXauthDir(uid, gid, &base_buf, runtime_dir);
+    defer xauth_dir.dir.close();
 
     var attempts: usize = 0;
     while (attempts < 16) : (attempts += 1) {
         var raw: [3]u8 = undefined;
         std.crypto.random.bytes(&raw);
         const id = std.fmt.bytesToHex(&raw, .lower);
-        const xauthority = try std.fmt.bufPrint(
-            buf,
-            "{s}/Xauthority-{s}",
-            .{ xauth_dir, id },
-        );
-        const file = std.fs.createFileAbsolute(xauthority, .{
+        const xauthority = try std.fmt.bufPrint(buf, "{s}/Xauthority-{s}", .{ xauth_dir.path, id });
+        const file_name = std.fs.path.baseName(xauthority);
+
+        const file = xauth_dir.dir.createFile(file_name, .{
             .mode = 0o600,
             .exclusive = true,
             .truncate = false,
