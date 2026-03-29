@@ -50,10 +50,13 @@ pub fn build(b: *std.Build) !void {
         .imports = &.{
             .{ .name = "build_options", .module = build_options_mod },
             .{ .name = "Ipc", .module = ipc_mod },
-            .{ .name = "pam", .module = pam.module("pam") },
             .{ .name = "vt", .module = vt_mod },
         },
     });
+
+    if (standalone) {
+        zgsld_mod.addImport("pam", pam.module("pam"));
+    }
 
     const test_step = b.step("test", "Run all tests.");
     const tests = b.addTest(.{ .root_module = zgsld_mod });
