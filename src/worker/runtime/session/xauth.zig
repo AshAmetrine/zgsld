@@ -107,7 +107,7 @@ fn resolveXauthDir(
 
     var user_dir_name_buf: [32]u8 = undefined;
     const user_dir_name = try std.fmt.bufPrint(&user_dir_name_buf, "{d}", .{uid});
-    const user_dir = try utils.ensureOwnedDirAt(base, user_dir_name, 0o700, uid, gid);
+    var user_dir = try utils.ensureOwnedDirAt(base, user_dir_name, 0o700, uid, gid);
     errdefer user_dir.close();
 
     const user_dir_path = try std.fmt.bufPrint(user_dir_buf, "{s}/{s}", .{ base_dir, user_dir_name });
@@ -131,7 +131,7 @@ fn createUniqueXauthFile(
     runtime_dir: ?[]const u8,
 ) !CreatedXauthFile {
     var base_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const xauth_dir = try resolveXauthDir(uid, gid, &base_buf, runtime_dir);
+    var xauth_dir = try resolveXauthDir(uid, gid, &base_buf, runtime_dir);
     defer xauth_dir.dir.close();
 
     var attempts: usize = 0;
@@ -140,7 +140,7 @@ fn createUniqueXauthFile(
         std.crypto.random.bytes(&raw);
         const id = std.fmt.bytesToHex(&raw, .lower);
         const xauthority = try std.fmt.bufPrint(buf, "{s}/Xauthority-{s}", .{ xauth_dir.path, id });
-        const file_name = std.fs.path.baseName(xauthority);
+        const file_name = std.fs.path.basename(xauthority);
 
         const file = xauth_dir.dir.createFile(file_name, .{
             .mode = 0o600,
