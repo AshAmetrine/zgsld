@@ -8,7 +8,7 @@ let
   cfg = config.services.zgsld;
   x11Support = cfg.package.x11Support;
   xserverBin = config.services.xserver.displayManager.xserverBin;
-  xserverArgs = config.services.xserver.displayManager.xserverBin;
+  xserverArgs = config.services.xserver.displayManager.xserverArgs;
 
   x11Command = lib.escapeShellArgs ([ xserverBin ] ++ xserverArgs);
 
@@ -18,23 +18,26 @@ let
     globalSection = {
       vt = cfg.vt;
     };
-    sections = {
-      session = {
-        service_name = "zgsld";
+    sections =
+      {
+        session = {
+          service_name = "zgsld";
+        };
+        greeter = {
+          user = "greeter";
+          service_name = "zgsld-greeter";
+          session_type = cfg.greeter.sessionType;
+          command = cfg.greeter.command;
+        };
+      }
+      // lib.optionalAttrs x11Support {
+        x11.command = x11Command;
       };
-      greeter = {
-        user = "greeter";
-        service_name = "zgsld-greeter";
-        session_type = cfg.greeter.sessionType;
-        command = cfg.greeter.command;
-      };
-    };
-  }
-  // lib.optionalAttrs (x11Support) {
-    sections.x11.command = x11Command;
   };
 
   finalConfig = lib.recursiveUpdate defaultConfig cfg.settings;
+
+  greeterUser = finalConfig.sections.greeter.user;
 in
 {
   options.services.zgsld = {
@@ -99,12 +102,12 @@ in
 
     systemd.services."autovt@tty${toString cfg.vt}".enable = false;
 
-    users.users.${cfg.greeter.user} = {
+    users.users.${greeterUser} = {
       isSystemUser = true;
-      group = cfg.greeter.user;
+      group = greeterUser;
     };
 
-    users.groups.${cfg.greeter.user} = { };
+    users.groups.${greeterUser} = { };
 
     security.pam.services = {
       zgsld = {
