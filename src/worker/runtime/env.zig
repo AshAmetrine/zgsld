@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const Pam = @import("pam").Pam;
 const UserInfo = @import("user.zig").UserInfo;
@@ -52,4 +53,19 @@ pub fn applyUserEnv(session_envmap: *std.process.EnvMap, user: [:0]const u8) !Us
         .uid = pw.uid,
         .gid = pw.gid,
     };
+}
+
+pub fn applyTermEnv(session_envmap: *std.process.EnvMap) !void {
+    if (session_envmap.get("TERM") != null) return;
+
+    if (std.posix.getenv("TERM")) |term| {
+        try session_envmap.put("TERM", term);
+        return;
+    }
+
+    switch (builtin.os.tag) {
+        .linux => try session_envmap.put("TERM", "linux"),
+        .freebsd => try session_envmap.put("TERM", "xterm"),
+        else => {},
+    }
 }

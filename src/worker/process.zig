@@ -34,6 +34,9 @@ pub const WorkerProcess = struct {
         if (std.posix.getenv("PATH")) |path| {
             try worker_envmap.put("PATH", path);
         }
+        if (std.posix.getenv("TERM")) |term| {
+            try worker_envmap.put("TERM", term);
+        }
         if (opts.config.vt) |vt_num| {
             var vt_buf: [4]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});

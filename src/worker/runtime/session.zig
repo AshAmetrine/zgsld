@@ -26,6 +26,7 @@ pub fn start(
     vt: ?u8,
 ) !Session {
     try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, vt);
+    try env_mod.applyTermEnv(session_envmap);
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
         .session_info = info,

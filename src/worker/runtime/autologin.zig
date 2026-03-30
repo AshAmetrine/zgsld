@@ -35,6 +35,7 @@ pub fn run(opts: RunOpts) !void {
         try session_envmap.put("XDG_SESSION_TYPE", "x11");
     }
     try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.vt);
+    try env_mod.applyTermEnv(&session_envmap);
     const user_info = try env_mod.applyUserEnv(&session_envmap, opts.user);
     var session = try session_mod.Session.spawn(opts.allocator, .{
         .session_info = opts.info,
