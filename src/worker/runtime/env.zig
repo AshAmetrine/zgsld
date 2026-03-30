@@ -24,6 +24,7 @@ pub fn applyPamUserSessionEnv(
         try pam.putEnvAlloc("XDG_VTNR", vt_value);
     }
 
+    try pam.putEnv("XDG_SEAT=seat0");
     try pam.putEnv("XDG_SESSION_CLASS=user");
     try pam.openSession(.{});
 

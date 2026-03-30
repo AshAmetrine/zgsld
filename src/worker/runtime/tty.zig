@@ -3,8 +3,8 @@ const vt_mod = @import("vt");
 
 const log = std.log.scoped(.zgsld_worker);
 
-pub fn redirectStdioToControllingTty() !void {
-    var tty_file = try std.fs.openFileAbsolute("/dev/tty", .{ .mode = .read_write });
+pub fn redirectStdioToControllingTty(vt: ?u8) !void {
+    var tty_file = try vt_mod.openSessionControllingTty(vt);
     defer if (tty_file.handle > 2) tty_file.close();
 
     try std.posix.dup2(tty_file.handle, std.posix.STDIN_FILENO);

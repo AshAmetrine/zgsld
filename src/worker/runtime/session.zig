@@ -45,7 +45,6 @@ pub const Session = struct {
 
         launcher_pid: std.posix.pid_t,
         server_pid: std.posix.pid_t,
-        server_detached: bool,
 
         xauth_path: [:0]const u8,
         allocator: std.mem.Allocator,
@@ -55,7 +54,8 @@ pub const Session = struct {
                 std.posix.kill(self.server_pid, std.posix.SIG.TERM) catch {};
             }
 
-            if (!self.server_detached) {
+            if (self.server_pid == self.launcher_pid) {
+                // X server is not detached
                 _ = std.posix.waitpid(self.server_pid, 0);
             } else if (self.launcher_pid > 0) {
                 _ = std.posix.waitpid(self.launcher_pid, std.posix.W.NOHANG);
@@ -137,21 +137,21 @@ pub const Session = struct {
                 }
             }
 
-            const server_info = try x11.waitForXServer(setup.display, launcher_pid, 5000);
+            const xserver_pid = try x11.waitForXServer(setup.display, launcher_pid, 5000);
 
             const client_pid = try runSessionCommand(allocator, .{
                 .cmd = opts.session_info.command,
                 .environ = session_environ,
                 .user_info = opts.user_info,
                 .home_dir = opts.envmap.get("HOME"),
+                .vt = opts.vt,
             });
 
             return .{
                 .pid = client_pid,
                 .x11 = .{
                     .launcher_pid = launcher_pid,
-                    .server_pid = server_info.server_pid,
-                    .server_detached = server_info.detached,
+                    .server_pid = xserver_pid,
                     .xauth_path = setup.xauth_path,
                     .allocator = allocator,
                 },
@@ -163,6 +163,7 @@ pub const Session = struct {
             .environ = session_environ,
             .user_info = opts.user_info,
             .home_dir = opts.envmap.get("HOME"),
+            .vt = opts.vt,
         });
         return .{ .pid = session_pid };
     }
@@ -172,6 +173,7 @@ pub const Session = struct {
         user_info: UserInfo,
         home_dir: ?[]const u8,
         environ: [:null]const ?[*:0]const u8,
+        vt: ?u8,
     };
 
     fn runSessionCommand(allocator: std.mem.Allocator, opts: SessionCommandOpts) !std.posix.pid_t {
@@ -184,7 +186,7 @@ pub const Session = struct {
 
         const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
 
-        return try startCommandSession(opts.user_info, opts.home_dir, &wrapper, opts.environ);
+        return try startCommandSession(opts.user_info, opts.home_dir, &wrapper, opts.environ, opts.vt);
     }
 };
 
@@ -193,10 +195,11 @@ fn startCommandSession(
     home_dir: ?[]const u8,
     argv: [:null]const ?[*:0]const u8,
     session_environ: [:null]const ?[*:0]const u8,
+    vt: ?u8,
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
     if (session_pid == 0) {
-        tty.redirectStdioToControllingTty() catch {
+        tty.redirectStdioToControllingTty(vt) catch {
             log.err("Failed to redirect session stdio", .{});
             std.process.exit(1);
         };

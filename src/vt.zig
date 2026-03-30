@@ -16,61 +16,71 @@ extern "c" fn ttyname_r(fd: std.posix.fd_t, buf: [*]u8, buflen: usize) c_int;
 // std.c.ioctl definition expects request to be c_int
 // but for glibc/BSD, it should be c_ulong, so we use c.ioctl instead
 
-pub fn initCurrentTty() !void {
-    var tty_file = try openCurrentTty(.read_write);
-    defer tty_file.close();
-
-    try becomeSessionLeader();
-    try attachControllingTty(tty_file.handle);
-}
-
-pub fn initTty(tty: u8) !void {
-    var tty_file = try openAndActivateTty(tty);
-    defer if (tty_file.handle > 2) tty_file.close();
-
-    try setTextMode(tty_file.handle);
-    try becomeSessionLeader();
-    try attachControllingTty(tty_file.handle);
-}
-
-pub fn resetTty(tty: u8) !void {
-    var tty_file = try openAndActivateTty(tty);
+fn setResolvedTtyTextMode(target_vt: ?u8) !void {
+    var tty_file = try openResolvedTty(target_vt, .read_write);
     defer if (tty_file.handle > 2) tty_file.close();
 
     try setTextMode(tty_file.handle);
 }
 
-pub fn resetTermios() void {
-    var termios = std.posix.tcgetattr(std.posix.STDIN_FILENO) catch {
+pub fn normalizeTty(target_vt: ?u8) !void {
+    try setResolvedTtyTextMode(target_vt);
+    resetTermios(target_vt);
+}
+
+fn resetTermios(target_vt: ?u8) void {
+    var tty_file = openResolvedTty(target_vt, .read_write) catch {
+        return;
+    };
+    defer if (tty_file.handle > 2) tty_file.close();
+
+    var termios = std.posix.tcgetattr(tty_file.handle) catch {
         return;
     };
     termios.lflag.ISIG = true;
     termios.lflag.ICANON = true;
     termios.lflag.ECHO = true;
     termios.lflag.ECHONL = true;
-    std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, termios) catch {};
+    std.posix.tcsetattr(tty_file.handle, .FLUSH, termios) catch {};
 }
 
-pub fn restoreControllingTty(target_vt: ?u8) !void {
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tty_path = try resolveTargetTtyPath(&path_buf, target_vt);
-    var tty_file = try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write });
-    defer if (tty_file.handle > 2) tty_file.close();
+fn openResolvedTty(target_vt: ?u8, mode: std.fs.File.OpenMode) !std.fs.File {
+    if (target_vt) |vt_num| {
+        if (mode == .read_write) return openAndActivateTty(vt_num);
 
-    if (controllingTtyIsCurrentSession(tty_file.handle)) {
-        log.debug("Controlling TTY already matches desired TTY", .{});
-        return;
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tty_path = try getTtyPath(&path_buf, vt_num);
+        return std.fs.openFileAbsolute(tty_path, .{ .mode = mode });
     }
 
-    try attachControllingTty(tty_file.handle);
+    return openCurrentTty(mode);
 }
 
-pub const ControllingTtyInputWatcher = struct {
+pub fn openSessionControllingTty(target_vt: ?u8) !std.fs.File {
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tty_path = if (target_vt) |vt_num|
+        try getTtyPath(&path_buf, vt_num)
+    else
+        try resolveTargetTtyPath(&path_buf, null);
+
+    try becomeSessionLeader();
+
+    var tty_file = if (target_vt) |_|
+        try openResolvedTty(target_vt, .read_write)
+    else
+        try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write });
+    errdefer if (tty_file.handle > 2) tty_file.close();
+
+    try attachControllingTty(tty_file.handle);
+    return tty_file;
+}
+
+pub const TtyInputWatcher = struct {
     file: std.fs.File,
     original: std.posix.termios,
 
-    pub fn init() !ControllingTtyInputWatcher {
-        var tty_file = try openCurrentTty(.read_write);
+    pub fn init(target_vt: ?u8) !TtyInputWatcher {
+        var tty_file = try openResolvedTty(target_vt, .read_write);
         errdefer tty_file.close();
 
         const original = try std.posix.tcgetattr(tty_file.handle);
@@ -89,12 +99,12 @@ pub const ControllingTtyInputWatcher = struct {
         };
     }
 
-    pub fn deinit(self: *ControllingTtyInputWatcher) void {
+    pub fn deinit(self: *TtyInputWatcher) void {
         std.posix.tcsetattr(self.file.handle, .FLUSH, self.original) catch {};
         self.file.close();
     }
 
-    pub fn waitForInput(self: *ControllingTtyInputWatcher, timeout_ms: u64) !bool {
+    pub fn waitForInput(self: *TtyInputWatcher, timeout_ms: u64) !bool {
         var poll_fds = [1]std.posix.pollfd{.{
             .fd = self.file.handle,
             .events = std.posix.POLL.IN,
@@ -106,25 +116,11 @@ pub const ControllingTtyInputWatcher = struct {
     }
 };
 
-pub fn waitForControllingTtyInput(timeout_seconds: u64) !bool {
-    if (timeout_seconds == 0) return false;
-
-    var watcher = try ControllingTtyInputWatcher.init();
-    defer watcher.deinit();
-
-    const timeout_ms_u64 = std.math.mul(u64, timeout_seconds, std.time.ms_per_s) catch std.math.maxInt(u64);
-    return watcher.waitForInput(timeout_ms_u64);
-}
-
 pub fn getCurrentTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     var tty_file = try openCurrentTty(.read_only);
     defer tty_file.close();
 
-    const rc = ttyname_r(tty_file.handle, @ptrCast(buf), buf.len);
-    if (rc != 0) return std.posix.unexpectedErrno(@enumFromInt(rc));
-
-    const tty_path = std.mem.sliceTo(buf, 0);
-    return buf[0..tty_path.len :0];
+    return ttyPathFromFd(tty_file.handle, buf);
 }
 
 pub fn getInheritedTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
@@ -135,10 +131,7 @@ pub fn getInheritedTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     };
 
     for (inherited_fds) |fd| {
-        const rc = ttyname_r(fd, @ptrCast(buf), buf.len);
-        if (rc != 0) continue;
-
-        const tty_path = std.mem.sliceTo(buf, 0);
+        const tty_path = ttyPathFromFd(fd, buf) catch continue;
         if (std.mem.eql(u8, tty_path, "/dev/tty")) continue;
         return buf[0..tty_path.len :0];
     }
@@ -189,6 +182,14 @@ fn setTextMode(fd: std.posix.fd_t) !void {
     if (comptime builtin.os.tag != .linux) return;
     const status = c.ioctl(fd, c.KDSETMODE, @as(c_int, c.KD_TEXT));
     if (status != 0) return error.FailedToSetTextMode;
+}
+
+fn ttyPathFromFd(fd: std.posix.fd_t, buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
+    const rc = ttyname_r(fd, @ptrCast(buf), buf.len);
+    if (rc != 0) return std.posix.unexpectedErrno(@enumFromInt(rc));
+
+    const tty_path = std.mem.sliceTo(buf, 0);
+    return buf[0..tty_path.len :0];
 }
 
 fn controllingTtyIsCurrentSession(fd: std.posix.fd_t) bool {

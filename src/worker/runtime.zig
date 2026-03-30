@@ -47,13 +47,13 @@ pub const WorkerRuntime = struct {
                 var greeter = try Greeter.init(self.allocator, .{
                     .service_name = service,
                     .username = greeter_username,
+                    .vt = vt,
                 });
                 defer greeter.deinit();
 
                 const greeter_pid = blk: {
                     defer std.posix.close(sock_fd);
-                    try greeter.spawn(sock_fd, greeter_cmd, greeter_session_type, vt);
-                    break :blk greeter.pid() orelse return error.GreeterSessionMissing;
+                    break :blk try greeter.spawn(sock_fd, greeter_cmd, greeter_session_type, vt);
                 };
                 signals.setActiveChild(greeter_pid);
                 defer signals.clearActiveChild();

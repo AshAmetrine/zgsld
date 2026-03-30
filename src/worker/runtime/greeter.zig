@@ -3,6 +3,7 @@ const Ipc = @import("Ipc");
 const pam_mod = @import("pam");
 const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
+const tty = @import("tty.zig");
 
 const Pam = pam_mod.Pam;
 const Session = session_mod.Session;
@@ -10,15 +11,14 @@ const Session = session_mod.Session;
 pub const GreeterOpts = struct {
     username: [:0]const u8,
     service_name: []const u8,
+    vt: ?u8,
 };
 
 pub const Greeter = struct {
     allocator: std.mem.Allocator,
     pam: Pam(void),
     session: ?Session = null,
-    user_z: [:0]const u8,
     user_info: UserInfo,
-    closed: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, opts: GreeterOpts) !Greeter {
         const pw = std.c.getpwnam(opts.username) orelse return error.GreeterUserNotFound;
@@ -29,11 +29,13 @@ pub const Greeter = struct {
         });
         errdefer pam.deinit();
 
+        var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        try pam.setItem(.{ .tty = try tty.resolvePamTty(&tty_path_buf, opts.vt) });
+
         return .{
             .allocator = allocator,
             .pam = pam,
             .session = null,
-            .user_z = opts.username,
             .user_info = .{
                 .username = opts.username,
                 .uid = pw.uid,
@@ -48,7 +50,13 @@ pub const Greeter = struct {
         greeter_cmd: []const u8,
         session_type: Ipc.SessionType,
         vt: ?u8,
-    ) !void {
+    ) !std.posix.pid_t {
+        if (vt) |vt_num| {
+            var vt_buf: [3]u8 = undefined;
+            const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
+            try self.pam.putEnvAlloc("XDG_VTNR", vt_value);
+        }
+        try self.pam.putEnv("XDG_SEAT=seat0");
         try self.pam.putEnv("XDG_SESSION_CLASS=greeter");
         try self.pam.openSession(.{});
         var envmap = try self.pam.createEnvListMap();
@@ -64,12 +72,6 @@ pub const Greeter = struct {
         const log_fd_str = try std.fmt.bufPrintZ(&log_fd_buf, "{d}", .{log_fd});
         try envmap.put("ZGSLD_LOG", log_fd_str);
 
-        if (vt) |vt_num| {
-            var vt_buf: [3]u8 = undefined;
-            const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
-            try envmap.put("XDG_VTNR", vt_value);
-        }
-
         const session_info: Ipc.SessionInfo = .{
             .session_type = session_type,
             .command = .{
@@ -84,16 +86,11 @@ pub const Greeter = struct {
             .user_info = self.user_info,
             .vt = vt,
         });
-    }
 
-    pub fn pid(self: *Greeter) ?std.posix.pid_t {
-        if (self.session) |session| return session.pid;
-        return null;
+        return self.session.?.pid;
     }
 
     pub fn deinit(self: *Greeter) void {
-        if (self.closed) return;
-        self.closed = true;
         if (self.session) |*session| session.deinit();
         self.pam.deinit();
         self.session = null;

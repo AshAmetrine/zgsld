@@ -93,27 +93,17 @@ fn isXServerListening(display: u8) bool {
     return true;
 }
 
-pub const XServerStart = struct {
-    server_pid: std.posix.pid_t,
-    detached: bool,
-};
-
 pub fn waitForXServer(
     display: u8,
     launcher_pid: std.posix.pid_t,
     timeout_ms: u32,
-) !XServerStart {
+) !std.posix.pid_t {
     var elapsed: u32 = 0;
     var launcher_exited = false;
     while (elapsed < timeout_ms) : (elapsed += 50) {
         // The lock PID can appear before the socket is actually ready.
         if (readXServerPid(display)) |pid| {
-            if (isXServerListening(display)) {
-                return .{
-                    .server_pid = pid,
-                    .detached = pid != launcher_pid,
-                };
-            }
+            if (isXServerListening(display)) return pid;
         }
 
         if (!launcher_exited) {

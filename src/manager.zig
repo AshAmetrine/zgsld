@@ -46,17 +46,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         return error.X11UnsupportedBuild;
     }
 
-    if (opts.config.vt) |vt_num| {
-        vt.initTty(vt_num) catch |err| {
-            log.err("Failed to init VT {d}: {s}", .{ vt_num, @errorName(err) });
-            std.process.exit(1);
-        };
-    } else {
-        vt.initCurrentTty() catch |err| {
-            log.err("VT is unset and no controlling TTY is available: {s}", .{@errorName(err)});
-            std.process.exit(1);
-        };
-    }
+    try vt.normalizeTty(opts.config.vt);
 
     if (!try userExists(opts.config.greeter.user)) {
         log.err("Greeter user not found: {s}", .{opts.config.greeter.user});
@@ -65,17 +55,15 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
     const run_autologin = try shouldRunAutologin(opts.config);
     if (run_autologin) {
-        defer cleanupControllingTty(opts.config.vt);
+        defer vt.normalizeTty(opts.config.vt) catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
-        prepareControllingTty(opts.config.vt);
         try runAutologin(opts);
         if (shutdown_requested.load(.seq_cst) != 0) return;
     }
 
     while (true) {
-        defer cleanupControllingTty(opts.config.vt);
+        defer vt.normalizeTty(opts.config.vt) catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
-        prepareControllingTty(opts.config.vt);
 
         const greeter_cmd = if (build_options.standalone) opts.greeter_cmd else {};
         const spawned = try spawnWorkers(.{
@@ -157,7 +145,7 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
     const autologin = opts.config.autologin;
 
     if (autologin.timeout_seconds != 0) {
-        var watcher = vt.ControllingTtyInputWatcher.init() catch |err| {
+        var watcher = vt.TtyInputWatcher.init(opts.config.vt) catch |err| {
             if (shutdown_requested.load(.seq_cst) != 0) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;
@@ -166,25 +154,25 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
 
         var remaining = autologin.timeout_seconds;
         while (remaining > 0) : (remaining -= 1) {
-            writeAutologinCountdown(remaining);
+            writeAutologinCountdown(&watcher.file, remaining);
 
             const interrupted = watcher.waitForInput(std.time.ms_per_s) catch |err| {
-                clearAutologinCountdown();
+                clearAutologinCountdown(&watcher.file);
                 if (shutdown_requested.load(.seq_cst) != 0) return;
                 log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
                 return;
             };
             if (shutdown_requested.load(.seq_cst) != 0) {
-                clearAutologinCountdown();
+                clearAutologinCountdown(&watcher.file);
                 return;
             }
             if (interrupted) {
-                clearAutologinCountdown();
+                clearAutologinCountdown(&watcher.file);
                 log.debug("Autologin interrupted; starting greeter", .{});
                 return;
             }
         }
-        clearAutologinCountdown();
+        clearAutologinCountdown(&watcher.file);
     }
 
     if (shutdown_requested.load(.seq_cst) != 0) return;
@@ -227,40 +215,21 @@ fn spawnAutologinWorker(opts: SpawnAutologinWorkerOpts) !worker.WorkerProcess {
     });
 }
 
-fn prepareControllingTty(vt_num: ?u8) void {
-    vt.restoreControllingTty(vt_num) catch |err| {
-        log.warn("Failed to restore controlling TTY before spawning workers: {s}", .{@errorName(err)});
-    };
-}
-
-fn cleanupControllingTty(vt_num: ?u8) void {
-    if (vt_num) |vt_id| {
-        vt.resetTty(vt_id) catch {};
-    }
-    vt.resetTermios();
-}
-
-fn writeAutologinCountdown(remaining_seconds: u64) void {
-    var tty_file = std.fs.openFileAbsolute("/dev/tty", .{ .mode = .write_only }) catch return;
-    defer tty_file.close();
-
+fn writeAutologinCountdown(tty_file: *std.fs.File, remaining_seconds: u64) void {
     var buf: [128]u8 = undefined;
     const msg = std.fmt.bufPrint(
         &buf,
         "\rLaunching session in {d}... (Press any key to interrupt)\x1b[K",
         .{remaining_seconds},
     ) catch return;
-    _ = std.posix.write(tty_file.handle, msg) catch return;
+    _ = tty_file.write(msg) catch return;
 }
 
-fn clearAutologinCountdown() void {
-    var tty_file = std.fs.openFileAbsolute("/dev/tty", .{ .mode = .write_only }) catch return;
-    defer tty_file.close();
-
-    _ = std.posix.write(tty_file.handle, "\r\x1b[K") catch return;
+fn clearAutologinCountdown(tty_file: *std.fs.File) void {
+    _ = tty_file.write("\r\x1b[K") catch return;
 }
 
-pub fn forwardIpc(
+fn forwardIpc(
     greeter_fd: std.posix.fd_t,
     worker_fd: std.posix.fd_t,
     greeter_worker_proc: worker.WorkerProcess,
