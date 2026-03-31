@@ -5,6 +5,7 @@ const autologin = @import("runtime/autologin.zig");
 const greeter_mod = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
+const Config = @import("../Config.zig");
 const SessionClass = @import("process.zig").SessionClass;
 
 const Greeter = greeter_mod.Greeter;
@@ -32,9 +33,7 @@ pub const WorkerRuntime = struct {
 
         const service = std.mem.span(argv[3]);
 
-        const vt = if (std.posix.getenv("ZGSLD_VTNR")) |vt_str| blk: {
-            break :blk try std.fmt.parseInt(u8, vt_str, 10);
-        } else null;
+        const vt = try Config.Vt.parse(std.posix.getenv("ZGSLD_VT"));
 
         switch (session_class) {
             .greeter => {

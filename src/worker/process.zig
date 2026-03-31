@@ -37,11 +37,13 @@ pub const WorkerProcess = struct {
         if (std.posix.getenv("TERM")) |term| {
             try worker_envmap.put("TERM", term);
         }
-        if (opts.config.vt) |vt_num| {
-            var vt_buf: [4]u8 = undefined;
-            const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
-            try worker_envmap.put("ZGSLD_VTNR", vt_value);
-        }
+        var vt_buf: [8]u8 = undefined;
+        const vt_value = switch (opts.config.vt) {
+            .unmanaged => "unmanaged",
+            .current => "current",
+            .number => |vt_num| try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num}),
+        };
+        try worker_envmap.put("ZGSLD_VT", vt_value);
         if (build_options.x11_support) {
             try worker_envmap.put("ZGSLD_X11_CMD", opts.config.x11.command);
         }

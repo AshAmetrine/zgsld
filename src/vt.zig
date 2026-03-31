@@ -13,22 +13,50 @@ const log = std.log.scoped(.zgsld);
 extern "c" fn getsid(pid: std.posix.pid_t) std.posix.pid_t;
 extern "c" fn ttyname_r(fd: std.posix.fd_t, buf: [*]u8, buflen: usize) c_int;
 
+pub const Vt = union(enum) {
+    unmanaged,
+    current,
+    number: u8,
+
+    pub fn parse(raw: ?[]const u8) !Vt {
+        const trimmed = std.mem.trim(u8, raw orelse "", " \t\r\n");
+        if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "current")) return .current;
+        if (std.mem.eql(u8, trimmed, "unmanaged")) return .unmanaged;
+
+        const number = try std.fmt.parseInt(u8, trimmed, 10);
+        if (number == 0) return error.InvalidTty;
+        return .{ .number = number };
+    }
+
+    pub fn ttyNumber(self: Vt) ?u8 {
+        return switch (self) {
+            .number => |vt_num| vt_num,
+            .unmanaged, .current => null,
+        };
+    }
+};
+
 // std.c.ioctl definition expects request to be c_int
 // but for glibc/BSD, it should be c_ulong, so we use c.ioctl instead
 
-fn setResolvedTtyTextMode(target_vt: ?u8) !void {
+fn setResolvedTtyTextMode(target_vt: Vt) !void {
     var tty_file = try openResolvedTty(target_vt, .read_write);
     defer if (tty_file.handle > 2) tty_file.close();
 
     try setTextMode(tty_file.handle);
 }
 
-pub fn normalizeTty(target_vt: ?u8) !void {
-    try setResolvedTtyTextMode(target_vt);
-    resetTermios(target_vt);
+pub fn normalizeTty(target_vt: Vt) !void {
+    switch (target_vt) {
+        .number, .current => {
+            try setResolvedTtyTextMode(target_vt);
+            resetTermios(target_vt);
+        },
+        .unmanaged => resetTermios(target_vt),
+    }
 }
 
-fn resetTermios(target_vt: ?u8) void {
+fn resetTermios(target_vt: Vt) void {
     var tty_file = openResolvedTty(target_vt, .read_write) catch {
         return;
     };
@@ -44,31 +72,30 @@ fn resetTermios(target_vt: ?u8) void {
     std.posix.tcsetattr(tty_file.handle, .FLUSH, termios) catch {};
 }
 
-fn openResolvedTty(target_vt: ?u8, mode: std.fs.File.OpenMode) !std.fs.File {
-    if (target_vt) |vt_num| {
-        if (mode == .read_write) return openAndActivateTty(vt_num);
+fn openResolvedTty(target_vt: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
+    return switch (target_vt) {
+        .unmanaged, .current => openCurrentTty(mode),
+        .number => |vt_num| blk: {
+            if (mode == .read_write) break :blk try openAndActivateTty(vt_num);
 
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = try getTtyPath(&path_buf, vt_num);
-        return std.fs.openFileAbsolute(tty_path, .{ .mode = mode });
-    }
-
-    return openCurrentTty(mode);
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const tty_path = try getTtyPath(&path_buf, vt_num);
+            break :blk try std.fs.openFileAbsolute(tty_path, .{ .mode = mode });
+        },
+    };
 }
 
-pub fn openSessionControllingTty(target_vt: ?u8) !std.fs.File {
+pub fn openSessionControllingTty(target_vt: Vt) !std.fs.File {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tty_path = if (target_vt) |vt_num|
-        try getTtyPath(&path_buf, vt_num)
-    else
-        try resolveTargetTtyPath(&path_buf, null);
+    const tty_path = try resolveTargetTtyPath(&path_buf, target_vt);
 
     try becomeSessionLeader();
 
-    var tty_file = if (target_vt) |_|
-        try openResolvedTty(target_vt, .read_write)
-    else
-        try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write });
+    var tty_file = switch (target_vt) {
+        .unmanaged => return error.TtyDisabled,
+        .number => try openResolvedTty(target_vt, .read_write),
+        .current => try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write }),
+    };
     errdefer if (tty_file.handle > 2) tty_file.close();
 
     try attachControllingTty(tty_file.handle);
@@ -79,8 +106,11 @@ pub const TtyInputWatcher = struct {
     file: std.fs.File,
     original: std.posix.termios,
 
-    pub fn init(target_vt: ?u8) !TtyInputWatcher {
-        var tty_file = try openResolvedTty(target_vt, .read_write);
+    pub fn init(target_vt: Vt) !TtyInputWatcher {
+        var tty_file = switch (target_vt) {
+            .unmanaged => try openCurrentTty(.read_write),
+            else => try openResolvedTty(target_vt, .read_write),
+        };
         errdefer tty_file.close();
 
         const original = try std.posix.tcgetattr(tty_file.handle);
@@ -229,18 +259,20 @@ fn openAndActivateTty(tty: u8) !std.fs.File {
     return std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write });
 }
 
-fn resolveTargetTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: ?u8) ![:0]const u8 {
-    if (target_vt) |vt_num| {
-        return getTtyPath(buf, vt_num);
-    }
+fn resolveTargetTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: Vt) ![:0]const u8 {
+    return switch (target_vt) {
+        .unmanaged => error.TtyDisabled,
+        .number => |vt_num| getTtyPath(buf, vt_num),
+        .current => blk: {
+            if (getInheritedTtyPath(buf)) |tty_path| {
+                break :blk tty_path;
+            } else |_| {}
 
-    if (getInheritedTtyPath(buf)) |tty_path| {
-        return tty_path;
-    } else |_| {}
-
-    const tty_path = try getCurrentTtyPath(buf);
-    if (std.mem.eql(u8, tty_path, "/dev/tty")) {
-        return error.InvalidTtyPath;
-    }
-    return tty_path;
+            const tty_path = try getCurrentTtyPath(buf);
+            if (std.mem.eql(u8, tty_path, "/dev/tty")) {
+                return error.InvalidTtyPath;
+            }
+            break :blk tty_path;
+        },
+    };
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const utils = @import("../user.zig");
 const UserInfo = utils.UserInfo;
+const Config = @import("../../../Config.zig");
 
 pub const xauth = @import("xauth.zig");
 
@@ -8,7 +9,7 @@ const XServerOpts = struct {
     x_cmd: [:0]const u8,
     xauth_path: [:0]const u8,
     display: u8,
-    vt: ?u8,
+    vt: Config.Vt,
     user: ?UserInfo,
     environ: [:null]const ?[*:0]const u8,
 };
@@ -18,7 +19,7 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
     const display_name = try std.fmt.bufPrint(&display_buf, ":{d}", .{opts.display});
 
     var vt_suffix_buf: [8]u8 = undefined;
-    const vt_suffix: []const u8 = if (opts.vt) |vt_num|
+    const vt_suffix: []const u8 = if (opts.vt.ttyNumber()) |vt_num|
         try std.fmt.bufPrint(&vt_suffix_buf, " vt{d}", .{vt_num})
     else
         "";

@@ -5,6 +5,7 @@ const pam_conv = @import("pam_conv.zig");
 const tty = @import("tty.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
+const Config = @import("../../Config.zig");
 
 const Pam = pam_mod.Pam;
 const PamCtx = pam_conv.PamCtx;
@@ -22,7 +23,7 @@ pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     service_name: []const u8,
     ipc_conn: *Ipc.Connection,
-    vt: ?u8,
+    vt: Config.Vt,
 };
 
 const SessionSetup = struct {
@@ -80,7 +81,9 @@ pub fn run(opts: RunOpts) !void {
                 defer pam.deinit();
 
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                try pam.setItem(.{ .tty = try tty.resolvePamTty(&tty_path_buf, opts.vt) });
+                if (try tty.resolvePamTty(&tty_path_buf, opts.vt)) |tty_path| {
+                    try pam.setItem(.{ .tty = tty_path });
+                }
 
                 if (!(try authenticate(&pam, &pam_ctx))) continue;
 
@@ -190,7 +193,7 @@ fn runSession(
     info: Ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.EnvMap,
-    vt: ?u8,
+    vt: Config.Vt,
 ) !void {
     log.debug("Starting session...", .{});
 

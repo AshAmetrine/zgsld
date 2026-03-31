@@ -67,6 +67,7 @@
               zig
               zls
               linux-pam
+              zon2nix
             ];
           };
         }

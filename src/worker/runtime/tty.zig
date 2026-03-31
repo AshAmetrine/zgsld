@@ -1,9 +1,12 @@
 const std = @import("std");
 const vt_mod = @import("vt");
+const Config = @import("../../Config.zig");
 
 const log = std.log.scoped(.zgsld_worker);
 
-pub fn redirectStdioToControllingTty(vt: ?u8) !void {
+pub fn redirectStdioToControllingTty(vt: Config.Vt) !void {
+    if (vt == .unmanaged) return;
+
     var tty_file = try vt_mod.openSessionControllingTty(vt);
     defer if (tty_file.handle > 2) tty_file.close();
 
@@ -12,13 +15,16 @@ pub fn redirectStdioToControllingTty(vt: ?u8) !void {
     try std.posix.dup2(tty_file.handle, std.posix.STDERR_FILENO);
 }
 
-pub fn resolvePamTty(tty_path_buf: *[std.fs.max_path_bytes]u8, vt: ?u8) ![:0]const u8 {
-    if (vt) |vt_num| {
-        if (vt_mod.getTtyPath(tty_path_buf, vt_num)) |tty_path| {
-            return tty_path;
-        } else |err| {
-            log.warn("Failed to resolve configured VT path for PAM_TTY: {s}", .{@errorName(err)});
-        }
+pub fn resolvePamTty(tty_path_buf: *[std.fs.max_path_bytes]u8, vt: Config.Vt) !?[:0]const u8 {
+    switch (vt) {
+        .number => |vt_num| {
+            if (vt_mod.getTtyPath(tty_path_buf, vt_num)) |tty_path| {
+                return tty_path;
+            } else |err| {
+                log.warn("Failed to resolve configured VT path for PAM_TTY: {s}", .{@errorName(err)});
+            }
+        },
+        .unmanaged, .current => {},
     }
 
     if (vt_mod.getInheritedTtyPath(tty_path_buf)) |tty_path| {

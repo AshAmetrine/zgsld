@@ -26,7 +26,6 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption([]const u8, "service_name", service_name);
     build_options.addOption([]const u8, "greeter_user", greeter_user);
     build_options.addOption([]const u8, "greeter_service_name", greeter_service_name);
-    build_options.addOption(?u8, "vt", null);
     build_options.addOption(bool, "x11_support", x11_support);
     build_options.addOption([]const u8, "x11_cmd", x11_cmd);
     const build_options_mod = build_options.createModule();

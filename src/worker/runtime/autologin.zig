@@ -5,6 +5,7 @@ const env_mod = @import("env.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
 const pam_mod = @import("pam");
+const Config = @import("../../Config.zig");
 
 const Pam = pam_mod.Pam;
 
@@ -13,7 +14,7 @@ pub const RunOpts = struct {
     service_name: []const u8,
     user: [:0]const u8,
     info: Ipc.SessionInfo,
-    vt: ?u8,
+    vt: Config.Vt,
 };
 
 pub fn run(opts: RunOpts) !void {
@@ -25,7 +26,9 @@ pub fn run(opts: RunOpts) !void {
     defer pam.deinit();
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    try pam.setItem(.{ .tty = try tty.resolvePamTty(&tty_path_buf, opts.vt) });
+    if (try tty.resolvePamTty(&tty_path_buf, opts.vt)) |tty_path| {
+        try pam.setItem(.{ .tty = tty_path });
+    }
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 

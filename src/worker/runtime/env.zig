@@ -2,12 +2,13 @@ const builtin = @import("builtin");
 const std = @import("std");
 const Pam = @import("pam").Pam;
 const UserInfo = @import("user.zig").UserInfo;
+const Config = @import("../../Config.zig");
 
 pub fn applyPamUserSessionEnv(
     comptime T: type,
     pam: *Pam(T),
     session_envmap: *std.process.EnvMap,
-    vt: ?u8,
+    vt: Config.Vt,
 ) !void {
     if (session_envmap.get("XDG_CURRENT_DESKTOP")) |v| {
         try pam.putEnvAlloc("XDG_CURRENT_DESKTOP", v);
@@ -19,7 +20,7 @@ pub fn applyPamUserSessionEnv(
         try pam.putEnvAlloc("XDG_SESSION_TYPE", v);
     }
 
-    if (vt) |vt_num| {
+    if (vt.ttyNumber()) |vt_num| {
         var vt_buf: [3]u8 = undefined;
         const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
         try pam.putEnvAlloc("XDG_VTNR", vt_value);

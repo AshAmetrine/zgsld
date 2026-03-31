@@ -6,6 +6,7 @@
 
 const build_options = @import("build_options");
 const Ipc = @import("Ipc");
+pub const Vt = @import("vt").Vt;
 
 const X11Config = struct {
     /// X server command, optionally with args.
@@ -46,9 +47,9 @@ const AutologinConfig = struct {
     timeout_seconds: u64 = 0,
 };
 
-/// VT to switch to before starting greeter/session.
-/// null to use current controlling tty
-vt: ?u8 = build_options.vt,
+/// VT handling policy for greeter/session startup.
+/// `unmanaged` uses tty/VT context established by an external launcher.
+vt: Vt = .current,
 
 greeter: GreeterConfig = .{},
 session: SessionConfig = .{},

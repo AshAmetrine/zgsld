@@ -9,6 +9,7 @@ const pam_mod = @import("pam");
 const PamCtx = @import("pam_conv.zig").PamCtx;
 const Pam = pam_mod.Pam;
 const UserInfo = utils.UserInfo;
+const Config = @import("../../Config.zig");
 
 const log = std.log.scoped(.zgsld_worker);
 
@@ -23,7 +24,7 @@ pub fn start(
     info: Ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.EnvMap,
-    vt: ?u8,
+    vt: Config.Vt,
 ) !Session {
     try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, vt);
     try env_mod.applyTermEnv(session_envmap);
@@ -77,7 +78,7 @@ pub const Session = struct {
         session_info: Ipc.SessionInfo,
         envmap: *std.process.EnvMap,
         user_info: UserInfo,
-        vt: ?u8,
+        vt: Config.Vt,
     };
 
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOpts) !Session {
@@ -174,7 +175,7 @@ pub const Session = struct {
         user_info: UserInfo,
         home_dir: ?[]const u8,
         environ: [:null]const ?[*:0]const u8,
-        vt: ?u8,
+        vt: Config.Vt,
     };
 
     fn runSessionCommand(allocator: std.mem.Allocator, opts: SessionCommandOpts) !std.posix.pid_t {
@@ -196,7 +197,7 @@ fn startCommandSession(
     home_dir: ?[]const u8,
     argv: [:null]const ?[*:0]const u8,
     session_environ: [:null]const ?[*:0]const u8,
-    vt: ?u8,
+    vt: Config.Vt,
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
     if (session_pid == 0) {

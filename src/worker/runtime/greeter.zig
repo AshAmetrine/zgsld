@@ -5,6 +5,7 @@ const pam_mod = @import("pam");
 const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
 const tty = @import("tty.zig");
+const Config = @import("../../Config.zig");
 
 const Pam = pam_mod.Pam;
 const Session = session_mod.Session;
@@ -12,7 +13,7 @@ const Session = session_mod.Session;
 pub const GreeterOpts = struct {
     username: [:0]const u8,
     service_name: []const u8,
-    vt: ?u8,
+    vt: Config.Vt,
 };
 
 pub const Greeter = struct {
@@ -31,7 +32,9 @@ pub const Greeter = struct {
         errdefer pam.deinit();
 
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        try pam.setItem(.{ .tty = try tty.resolvePamTty(&tty_path_buf, opts.vt) });
+        if (try tty.resolvePamTty(&tty_path_buf, opts.vt)) |tty_path| {
+            try pam.setItem(.{ .tty = tty_path });
+        }
 
         return .{
             .allocator = allocator,
@@ -50,9 +53,9 @@ pub const Greeter = struct {
         ipc_fd: std.posix.fd_t,
         greeter_cmd: []const u8,
         session_type: Ipc.SessionType,
-        vt: ?u8,
+        vt: Config.Vt,
     ) !std.posix.pid_t {
-        if (vt) |vt_num| {
+        if (vt.ttyNumber()) |vt_num| {
             var vt_buf: [3]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
             try self.pam.putEnvAlloc("XDG_VTNR", vt_value);

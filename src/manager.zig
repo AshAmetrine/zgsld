@@ -145,6 +145,7 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
     const autologin = opts.config.autologin;
 
     if (autologin.timeout_seconds != 0) {
+        var remaining = autologin.timeout_seconds;
         var watcher = vt.TtyInputWatcher.init(opts.config.vt) catch |err| {
             if (shutdown_requested.load(.seq_cst) != 0) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
@@ -152,7 +153,6 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
         };
         defer watcher.deinit();
 
-        var remaining = autologin.timeout_seconds;
         while (remaining > 0) : (remaining -= 1) {
             writeAutologinCountdown(&watcher.file, remaining);
 

@@ -26,11 +26,11 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "zigini-0.3.2-BSkB7UVDAAAErcEC6s7zF9bKTe7CjdBgrV35K3DGHpbr";
+    name = "zigini-0.4.0-BSkB7eJUAAD0Nt14fV482O8qNxsW8h_6BCTUIulluojv";
     path = fetchgit {
       url = "https://github.com/ashametrine/zigini";
-      rev = "831f6aff55703b7fa34b43c972d60eb3d5d6f4a4";
-      hash = "sha256-5Q4WSsWUaeVCsDgb8mBAf6ufwg6sGDlL1U0jMESgmDo=";
+      rev = "fe98c40f646aada9e68fcc955180929628cad3f6";
+      hash = "sha256-PGu5//rxAYvbz8DUjyix9WeJxAQmDtwlSiifbCtqhh8=";
     };
   }
 ]

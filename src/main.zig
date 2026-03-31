@@ -15,8 +15,7 @@ const clap_param_str =
     \\-h, --help                Shows all commands.
     \\-v, --version             Shows the version of zgsld.
     \\-c, --config <str>        Path to ZGSLD config
-    \\--vt <u8>                 Sets the VT number
-    \\--no-vt                   Unset VT and use current controlling TTY
+    \\--vt <str>                Sets VT to a number, `current` or `unmanaged`
 ;
 
 pub fn main() !void {
@@ -57,7 +56,7 @@ pub fn main() !void {
     defer conf_ini.deinit();
 
     const config_path = res.args.config orelse "/etc/zgsld/zgsld.ini";
-    var config = conf_ini.readFileToStruct(config_path, .{}) catch |err| switch (err) {
+    var config = conf_ini.readFileToStruct(config_path, .{ .convert = convertIniValue }) catch |err| switch (err) {
         error.FileNotFound => {
             log.err("Config file not found: {s}", .{config_path});
             return error.MissingConfig;
@@ -65,13 +64,8 @@ pub fn main() !void {
         else => return err,
     };
 
-    if (res.args.@"no-vt" != 0 and res.args.vt != null) {
-        return error.ConflictingVtArgs;
-    }
-    if (res.args.@"no-vt" != 0) {
-        config.vt = null;
-    } else if (res.args.vt) |vt| {
-        config.vt = vt;
+    if (res.args.vt) |vt| {
+        config.vt = try Config.Vt.parse(vt);
     }
 
     var self_exe_path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
@@ -84,4 +78,9 @@ pub fn main() !void {
         .self_exe_path = self_exe_path_z,
         .config = config,
     });
+}
+
+fn convertIniValue(allocator: std.mem.Allocator, comptime T: type, value: []const u8) anyerror!T {
+    if (T == Config.Vt) return Config.Vt.parse(value);
+    return zigini.defaultConvert(allocator, T, value);
 }
