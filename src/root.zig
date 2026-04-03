@@ -120,50 +120,48 @@ pub const Zgsld = struct {
     }
 
     fn runStandalone(self: Zgsld) !void {
-        if (build_options.standalone) {
-            var self_exe_path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-            const self_exe_path = try std.fs.selfExePath(&self_exe_path_buf);
-            self_exe_path_buf[self_exe_path.len] = 0;
-            const self_exe_path_z = self_exe_path_buf[0..self_exe_path.len :0];
+        if (!build_options.standalone) unreachable;
 
-            var zgsld_config = Config{};
-            var configure_arena = std.heap.ArenaAllocator.init(self.allocator);
-            defer configure_arena.deinit();
+        var self_exe_path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+        const self_exe_path = try std.fs.selfExePath(&self_exe_path_buf);
+        self_exe_path_buf[self_exe_path.len] = 0;
+        const self_exe_path_z = self_exe_path_buf[0..self_exe_path.len :0];
 
-            if (self.vtable.configure) |configure| {
-                try configure(.{
-                    .allocator = self.allocator,
-                    .arena_allocator = configure_arena.allocator(),
-                    .config = &zgsld_config,
-                });
-            }
+        var zgsld_config = Config{};
+        var configure_arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer configure_arena.deinit();
 
-            log.debug("Greeter Path: {s}", .{self_exe_path_z});
-            log.debug("Greeter User: {s}", .{zgsld_config.greeter.user});
-            log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
-            log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
-
-            const argv = std.os.argv;
-            var cmd_buf: std.ArrayList(u8) = .empty;
-            defer cmd_buf.deinit(self.allocator);
-
-            for (argv, 0..) |arg, i| {
-                if (i != 0) {
-                    try cmd_buf.append(self.allocator, ' ');
-                }
-                try appendShellQuotedArg(&cmd_buf, self.allocator, std.mem.span(arg));
-            }
-            const greeter_cmd = cmd_buf.items;
-            log.debug("Greeter Cmd: {s}", .{greeter_cmd});
-
-            try session_manager.run(.{
+        if (self.vtable.configure) |configure| {
+            try configure(.{
                 .allocator = self.allocator,
-                .self_exe_path = self_exe_path_z,
-                .greeter_cmd = greeter_cmd,
-                .config = zgsld_config,
+                .arena_allocator = configure_arena.allocator(),
+                .config = &zgsld_config,
             });
-        } else {
-            unreachable;
         }
+
+        log.debug("Greeter Path: {s}", .{self_exe_path_z});
+        log.debug("Greeter User: {s}", .{zgsld_config.greeter.user});
+        log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
+        log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
+
+        const argv = std.os.argv;
+        var cmd_buf: std.ArrayList(u8) = .empty;
+        defer cmd_buf.deinit(self.allocator);
+
+        for (argv, 0..) |arg, i| {
+            if (i != 0) {
+                try cmd_buf.append(self.allocator, ' ');
+            }
+            try appendShellQuotedArg(&cmd_buf, self.allocator, std.mem.span(arg));
+        }
+        const greeter_cmd = cmd_buf.items;
+        log.debug("Greeter Cmd: {s}", .{greeter_cmd});
+
+        try session_manager.run(.{
+            .allocator = self.allocator,
+            .self_exe_path = self_exe_path_z,
+            .greeter_cmd = greeter_cmd,
+            .config = zgsld_config,
+        });
     }
 };

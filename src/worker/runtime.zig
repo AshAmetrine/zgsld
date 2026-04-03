@@ -21,7 +21,7 @@ pub const WorkerRuntime = struct {
         return .{ .allocator = opts.allocator };
     }
 
-    pub fn run(self: *WorkerRuntime) !void {
+    pub fn run(self: WorkerRuntime) !void {
         signals.installHandlers();
 
         const argv = std.os.argv;

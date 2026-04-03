@@ -45,9 +45,8 @@ fn mcookie() [Md5.digest_length]u8 {
     return out;
 }
 
-// var xauth_buf: [256]u8 = undefined;
 pub fn createXauthEntry(
-    buf: []u8,
+    path_buf: []u8,
     display_num: []const u8,
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
@@ -55,7 +54,7 @@ pub fn createXauthEntry(
 ) ![]const u8 {
     if (display_num.len == 0) return error.InvalidDisplay;
 
-    const xauth_file = try createUniqueXauthFile(buf, uid, gid, runtime_dir);
+    const xauth_file = try createUniqueXauthFile(path_buf, uid, gid, runtime_dir);
     errdefer _ = std.fs.deleteFileAbsolute(xauth_file.path) catch {};
     defer xauth_file.file.close();
 
@@ -125,7 +124,7 @@ const CreatedXauthFile = struct {
 /// Finds a suitable dir to store the Xauth file,
 /// then creates the file with a unique id.
 fn createUniqueXauthFile(
-    buf: []u8,
+    path_buf: []u8,
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
     runtime_dir: ?[]const u8,
@@ -139,7 +138,7 @@ fn createUniqueXauthFile(
         var raw: [3]u8 = undefined;
         std.crypto.random.bytes(&raw);
         const id = std.fmt.bytesToHex(&raw, .lower);
-        const xauthority = try std.fmt.bufPrint(buf, "{s}/Xauthority-{s}", .{ xauth_dir.path, id });
+        const xauthority = try std.fmt.bufPrint(path_buf, "{s}/Xauthority-{s}", .{ xauth_dir.path, id });
         const file_name = std.fs.path.basename(xauthority);
 
         const file = xauth_dir.dir.createFile(file_name, .{

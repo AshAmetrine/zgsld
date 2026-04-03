@@ -46,12 +46,12 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         return error.X11UnsupportedBuild;
     }
 
-    try vt.normalizeTty(opts.config.vt);
-
     if (!try userExists(opts.config.greeter.user)) {
         log.err("Greeter user not found: {s}", .{opts.config.greeter.user});
         return error.GreeterUserNotFound;
     }
+
+    try vt.normalizeTty(opts.config.vt);
 
     const run_autologin = try shouldRunAutologin(opts.config);
     if (run_autologin) {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const fd = @import("fd.zig");
 
 const SocketPair = @This();
 
@@ -13,8 +14,7 @@ pub fn init(parent_cloexec: bool) !SocketPair {
     errdefer std.posix.close(fds[1]);
 
     if (parent_cloexec) {
-        const flags = try std.posix.fcntl(fds[0], std.posix.F.GETFD, 0);
-        _ = try std.posix.fcntl(fds[0], std.posix.F.SETFD, flags | std.posix.FD_CLOEXEC);
+        try fd.setCloseOnExec(fds[0]);
     }
 
     return .{

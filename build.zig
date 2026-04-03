@@ -7,11 +7,10 @@ pub fn build(b: *std.Build) !void {
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const standalone_opt = b.option(bool, "standalone", "Build standalone greeter + session manager") orelse false;
-    if (b.pkg_hash.len == 0 and standalone_opt) {
+    const standalone = b.option(bool, "standalone", "Build standalone greeter + session manager") orelse if (b.pkg_hash.len == 0) false else true;
+    if (b.pkg_hash.len == 0 and standalone) {
         std.log.warn("zgsld: ignoring -Dstandalone=true for top-level builds (library-only option)", .{});
     }
-    const standalone = if (b.pkg_hash.len == 0) false else standalone_opt;
 
     const service_name = b.option([]const u8, "service-name", "Set PAM service name") orelse "login";
     const greeter_user = b.option([]const u8, "greeter-user", "User that runs the greeter") orelse "greeter";
@@ -53,9 +52,7 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    if (standalone) {
-        zgsld_mod.addImport("pam", pam.module("pam"));
-    }
+    if (standalone) zgsld_mod.addImport("pam", pam.module("pam"));
 
     const test_step = b.step("test", "Run all tests.");
     const tests = b.addTest(.{ .root_module = zgsld_mod });

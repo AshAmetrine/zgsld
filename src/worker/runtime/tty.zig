@@ -5,8 +5,6 @@ const Config = @import("../../Config.zig");
 const log = std.log.scoped(.zgsld_worker);
 
 pub fn redirectStdioToControllingTty(vt: Config.Vt) !void {
-    if (vt == .unmanaged) return;
-
     var tty_file = try vt_mod.openSessionControllingTty(vt);
     defer if (tty_file.handle > 2) tty_file.close();
 

@@ -74,7 +74,7 @@ fn resetTermios(target_vt: Vt) void {
 
 fn openResolvedTty(target_vt: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
     return switch (target_vt) {
-        .unmanaged, .current => openCurrentTty(mode),
+        .unmanaged, .current => openControllingTty(mode),
         .number => |vt_num| blk: {
             if (mode == .read_write) break :blk try openAndActivateTty(vt_num);
 
@@ -108,7 +108,7 @@ pub const TtyInputWatcher = struct {
 
     pub fn init(target_vt: Vt) !TtyInputWatcher {
         var tty_file = switch (target_vt) {
-            .unmanaged => try openCurrentTty(.read_write),
+            .unmanaged => try openControllingTty(.read_write),
             else => try openResolvedTty(target_vt, .read_write),
         };
         errdefer tty_file.close();
@@ -147,7 +147,7 @@ pub const TtyInputWatcher = struct {
 };
 
 pub fn getCurrentTtyPath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
-    var tty_file = try openCurrentTty(.read_only);
+    var tty_file = try openControllingTty(.read_only);
     defer tty_file.close();
 
     return ttyPathFromFd(tty_file.handle, buf);
@@ -246,7 +246,7 @@ fn attachControllingTty(fd: std.posix.fd_t) !void {
     }
 }
 
-fn openCurrentTty(mode: std.fs.File.OpenMode) !std.fs.File {
+fn openControllingTty(mode: std.fs.File.OpenMode) !std.fs.File {
     return std.fs.openFileAbsolute("/dev/tty", .{ .mode = mode });
 }
 
@@ -261,9 +261,8 @@ fn openAndActivateTty(tty: u8) !std.fs.File {
 
 fn resolveTargetTtyPath(buf: *[std.fs.max_path_bytes]u8, target_vt: Vt) ![:0]const u8 {
     return switch (target_vt) {
-        .unmanaged => error.TtyDisabled,
         .number => |vt_num| getTtyPath(buf, vt_num),
-        .current => blk: {
+        .unmanaged, .current => blk: {
             if (getInheritedTtyPath(buf)) |tty_path| {
                 break :blk tty_path;
             } else |_| {}

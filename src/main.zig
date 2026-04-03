@@ -64,9 +64,7 @@ pub fn main() !void {
         else => return err,
     };
 
-    if (res.args.vt) |vt| {
-        config.vt = try Config.Vt.parse(vt);
-    }
+    if (res.args.vt) |vt| config.vt = try Config.Vt.parse(vt);
 
     var self_exe_path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
     const self_exe_path = try std.fs.selfExePath(&self_exe_path_buf);
