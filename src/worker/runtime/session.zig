@@ -207,8 +207,8 @@ fn startCommandSession(
                 std.process.exit(1);
             };
 
-            var tty_file = vt.open(.read_write) catch |err| {
-                log.err("Failed to open session tty: {s}", .{@errorName(err)});
+            var tty_file = vt.openDevice(.read_write) catch |err| {
+                log.err("Failed to open session tty device: {s}", .{@errorName(err)});
                 std.process.exit(1);
             };
             defer if (tty_file.handle > 2) tty_file.close();

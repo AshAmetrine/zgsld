@@ -70,12 +70,14 @@ pub const Vt = union(enum) {
     pub fn open(self: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
         return switch (self) {
             .unmanaged, .current => openControllingTty(mode),
-            .number => |vt_num| blk: {
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const tty_path = try getTtyDevicePath(&path_buf, vt_num);
-                break :blk try std.fs.openFileAbsolute(tty_path, .{ .mode = mode });
-            },
+            .number => self.openDevice(mode),
         };
+    }
+
+    pub fn openDevice(self: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tty_path = (try self.resolveTtyDevicePath(&path_buf)) orelse return error.InvalidTtyPath;
+        return try std.fs.openFileAbsolute(tty_path, .{ .mode = mode });
     }
 
     pub fn resolveTtyDevicePath(self: Vt, buf: *[std.fs.max_path_bytes]u8) !?[:0]const u8 {
