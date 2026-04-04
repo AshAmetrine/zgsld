@@ -2,8 +2,11 @@ const std = @import("std");
 const utils = @import("../user.zig");
 const UserInfo = utils.UserInfo;
 const Config = @import("../../../Config.zig");
+const tty = @import("../tty.zig");
 
 pub const xauth = @import("xauth.zig");
+
+const log = std.log.scoped(.zgsld_worker);
 
 const XServerOpts = struct {
     x_cmd: [:0]const u8,
@@ -41,6 +44,19 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
 
     const pid = try std.posix.fork();
     if (pid == 0) {
+        {
+            var tty_file = opts.vt.openDevice(.read_write) catch |err| {
+                log.err("Failed to open X server tty device: {s}", .{@errorName(err)});
+                std.process.exit(1);
+            };
+            defer if (tty_file.handle > 2) tty_file.close();
+
+            tty.redirectStdioToTty(tty_file.handle) catch |err| {
+                log.err("Failed to redirect X server stdio to tty: {s}", .{@errorName(err)});
+                std.process.exit(1);
+            };
+        }
+
         if (opts.user) |u| {
             utils.dropPrivileges(u) catch std.process.exit(1);
         }
