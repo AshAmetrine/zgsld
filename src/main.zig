@@ -47,7 +47,8 @@ pub fn main() !void {
         var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
         const stderr = &stderr_writer.interface;
 
-        try stderr.writeAll("zgsld version " ++ build_options.version ++ "\n");
+        try stderr.writeAll("zgsld " ++ build_options.version ++ "\n");
+        try stderr.print("features: x11={s}\n", .{if (build_options.x11_support) "yes" else "no"});
         try stderr.flush();
         std.process.exit(0);
     }
