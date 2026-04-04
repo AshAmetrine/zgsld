@@ -51,18 +51,18 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         return error.GreeterUserNotFound;
     }
 
-    try vt.normalizeTty(opts.config.vt);
+    try opts.config.vt.normalize();
 
     const run_autologin = try shouldRunAutologin(opts.config);
     if (run_autologin) {
-        defer vt.normalizeTty(opts.config.vt) catch {};
+        defer opts.config.vt.normalize() catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
         try runAutologin(opts);
         if (shutdown_requested.load(.seq_cst) != 0) return;
     }
 
     while (true) {
-        defer vt.normalizeTty(opts.config.vt) catch {};
+        defer opts.config.vt.normalize() catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
 
         const greeter_cmd = if (build_options.standalone) opts.greeter_cmd else {};
@@ -145,8 +145,9 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
     const autologin = opts.config.autologin;
 
     if (autologin.timeout_seconds != 0) {
+        try opts.config.vt.activate();
         var remaining = autologin.timeout_seconds;
-        var watcher = vt.TtyInputWatcher.init(opts.config.vt) catch |err| {
+        var watcher = opts.config.vt.watchInput() catch |err| {
             if (shutdown_requested.load(.seq_cst) != 0) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;

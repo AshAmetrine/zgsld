@@ -4,7 +4,6 @@ const env_mod = @import("env.zig");
 const pam_mod = @import("pam");
 const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
-const tty = @import("tty.zig");
 const Config = @import("../../Config.zig");
 
 const Pam = pam_mod.Pam;
@@ -32,7 +31,7 @@ pub const Greeter = struct {
         errdefer pam.deinit();
 
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        if (try tty.resolvePamTty(&tty_path_buf, opts.vt)) |tty_path| {
+        if (try opts.vt.resolveTtyDevicePath(&tty_path_buf)) |tty_path| {
             try pam.setItem(.{ .tty = tty_path });
         }
 

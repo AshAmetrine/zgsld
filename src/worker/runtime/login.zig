@@ -2,7 +2,6 @@ const std = @import("std");
 const Ipc = @import("Ipc");
 const pam_mod = @import("pam");
 const pam_conv = @import("pam_conv.zig");
-const tty = @import("tty.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
 const Config = @import("../../Config.zig");
@@ -81,7 +80,7 @@ pub fn run(opts: RunOpts) !void {
                 defer pam.deinit();
 
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                if (try tty.resolvePamTty(&tty_path_buf, opts.vt)) |tty_path| {
+                if (try opts.vt.resolveTtyDevicePath(&tty_path_buf)) |tty_path| {
                     try pam.setItem(.{ .tty = tty_path });
                 }
 
