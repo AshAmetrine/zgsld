@@ -86,15 +86,19 @@ fn openResolvedTty(target_vt: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
 }
 
 pub fn openSessionControllingTty(target_vt: Vt) !std.fs.File {
+    if (target_vt == .unmanaged) {
+        return openControllingTty(.read_write);
+    }
+
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tty_path = try resolveTargetTtyPath(&path_buf, target_vt);
 
     try becomeSessionLeader();
 
     var tty_file = switch (target_vt) {
-        .unmanaged => return error.TtyDisabled,
         .number => try openResolvedTty(target_vt, .read_write),
         .current => try std.fs.openFileAbsolute(tty_path, .{ .mode = .read_write }),
+        .unmanaged => unreachable,
     };
     errdefer if (tty_file.handle > 2) tty_file.close();
 

@@ -201,8 +201,8 @@ fn startCommandSession(
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
     if (session_pid == 0) {
-        tty.redirectStdioToControllingTty(vt) catch {
-            log.err("Failed to redirect session stdio", .{});
+        tty.redirectStdioToControllingTty(vt) catch |err| {
+            log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
             std.process.exit(1);
         };
 
