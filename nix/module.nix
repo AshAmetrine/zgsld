@@ -10,7 +10,7 @@ let
   xserverBin = config.services.xserver.displayManager.xserverBin;
   xserverArgs = config.services.xserver.displayManager.xserverArgs;
 
-  x11Command = lib.escapeShellArgs ([ xserverBin ] ++ xserverArgs);
+  x11Command = lib.concatStringsSep " " ([ xserverBin ] ++ xserverArgs);
 
   iniFmt = pkgs.formats.iniWithGlobalSection { };
 
