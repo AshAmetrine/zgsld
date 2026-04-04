@@ -4,13 +4,10 @@ const Config = @import("../../Config.zig");
 
 const log = std.log.scoped(.zgsld_worker);
 
-pub fn redirectStdioToControllingTty(vt: Config.Vt) !void {
-    var tty_file = try vt_mod.openSessionControllingTty(vt);
-    defer if (tty_file.handle > 2) tty_file.close();
-
-    try std.posix.dup2(tty_file.handle, std.posix.STDIN_FILENO);
-    try std.posix.dup2(tty_file.handle, std.posix.STDOUT_FILENO);
-    try std.posix.dup2(tty_file.handle, std.posix.STDERR_FILENO);
+pub fn redirectStdioToControllingTty(tty_fd: std.posix.fd_t) !void {
+    try std.posix.dup2(tty_fd, std.posix.STDIN_FILENO);
+    try std.posix.dup2(tty_fd, std.posix.STDOUT_FILENO);
+    try std.posix.dup2(tty_fd, std.posix.STDERR_FILENO);
 }
 
 pub fn resolvePamTty(tty_path_buf: *[std.fs.max_path_bytes]u8, vt: Config.Vt) !?[:0]const u8 {

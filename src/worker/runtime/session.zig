@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const tty = @import("tty.zig");
+const vt_mod = @import("vt");
 const env_mod = @import("env.zig");
 const build_options = @import("build_options");
 const x11 = if (build_options.x11_support) @import("session/x11.zig");
@@ -201,10 +202,18 @@ fn startCommandSession(
 ) !std.posix.pid_t {
     const session_pid = try std.posix.fork();
     if (session_pid == 0) {
-        tty.redirectStdioToControllingTty(vt) catch |err| {
-            log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
-            std.process.exit(1);
-        };
+        {
+            var tty_file = vt_mod.openSessionControllingTty(vt) catch |err| {
+                log.err("Failed to open session controlling tty: {s}", .{@errorName(err)});
+                std.process.exit(1);
+            };
+            defer if (tty_file.handle > 2) tty_file.close();
+
+            tty.redirectStdioToControllingTty(tty_file.handle) catch |err| {
+                log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
+                std.process.exit(1);
+            };
+        }
 
         utils.dropPrivileges(user_info) catch std.process.exit(1);
         if (home_dir) |dir| {
