@@ -195,6 +195,11 @@ fn runSession(
     vt: Config.Vt,
 ) !void {
     log.debug("Starting session...", .{});
+    try vt.activate();
+
+    var tty_file = try vt.openDevice(.read_write);
+    defer if (tty_file.handle > 2) tty_file.close();
+    try vt.establishSessionControllingTty(tty_file.handle);
 
     var session = blk: {
         defer session_envmap.deinit();

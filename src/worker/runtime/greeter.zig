@@ -54,6 +54,12 @@ pub const Greeter = struct {
         session_type: Ipc.SessionType,
         vt: Config.Vt,
     ) !std.posix.pid_t {
+        try vt.activate();
+
+        var tty_file = try vt.openDevice(.read_write);
+        defer if (tty_file.handle > 2) tty_file.close();
+        try vt.establishSessionControllingTty(tty_file.handle);
+
         if (vt.ttyNumber()) |vt_num| {
             var vt_buf: [3]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});

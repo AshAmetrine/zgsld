@@ -63,7 +63,7 @@ pub const Vt = union(enum) {
 
                 const wait_status = c.ioctl(console.handle, c.VT_WAITACTIVE, @as(c_int, vt_num));
                 if (wait_status != 0) return error.FailedToWaitForActiveTty;
-            }
+            },
         }
     }
 
@@ -117,8 +117,10 @@ pub const Vt = union(enum) {
     }
 
     pub fn establishSessionControllingTty(self: Vt, fd: std.posix.fd_t) !void {
-        if (self == .unmanaged) return;
+        _ = self;
+        //if (self == .unmanaged) return;
 
+        if (controllingTtyIsCurrentSession(fd)) return;
         try becomeSessionLeader();
         try attachControllingTty(fd);
     }
@@ -151,7 +153,7 @@ pub const Vt = union(enum) {
         termios.lflag.ECHONL = true;
         std.posix.tcsetattr(tty_file.handle, .FLUSH, termios) catch {};
     }
-    
+
     pub const InputWatcher = struct {
         file: std.fs.File,
         original: std.posix.termios,

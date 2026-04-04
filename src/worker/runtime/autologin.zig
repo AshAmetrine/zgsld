@@ -36,6 +36,12 @@ pub fn run(opts: RunOpts) !void {
     if (opts.info.session_type == .x11) {
         try session_envmap.put("XDG_SESSION_TYPE", "x11");
     }
+    try opts.vt.activate();
+
+    var tty_file = try opts.vt.openDevice(.read_write);
+    defer if (tty_file.handle > 2) tty_file.close();
+    try opts.vt.establishSessionControllingTty(tty_file.handle);
+
     try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.vt);
     try env_mod.applyTermEnv(&session_envmap);
     const user_info = try env_mod.applyUserEnv(&session_envmap, opts.user);

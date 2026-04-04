@@ -213,11 +213,6 @@ fn startCommandSession(
             };
             defer if (tty_file.handle > 2) tty_file.close();
 
-            vt.establishSessionControllingTty(tty_file.handle) catch |err| {
-                log.err("Failed to establish session controlling tty: {s}", .{@errorName(err)});
-                std.process.exit(1);
-            };
-
             tty.redirectStdioToTty(tty_file.handle) catch |err| {
                 log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
                 std.process.exit(1);
