@@ -51,8 +51,8 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
             };
             defer if (tty_file.handle > 2) tty_file.close();
 
-            tty.redirectStdioToTty(tty_file.handle) catch |err| {
-                log.err("Failed to redirect X server stdio to tty: {s}", .{@errorName(err)});
+            tty.redirectStdinToTty(tty_file.handle) catch |err| {
+                log.err("Failed to redirect X server stdin to tty: {s}", .{@errorName(err)});
                 std.process.exit(1);
             };
         }
