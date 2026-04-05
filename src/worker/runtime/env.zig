@@ -24,9 +24,16 @@ pub fn applyPamUserSessionEnv(
         var vt_buf: [3]u8 = undefined;
         const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
         try pam.putEnvAlloc("XDG_VTNR", vt_value);
+    } else if (std.posix.getenv("XDG_VTNR")) |vt_num| {
+        try pam.putEnvAlloc("XDG_VTNR", vt_num);
     }
 
-    try pam.putEnv("XDG_SEAT=seat0");
+    if (std.posix.getenv("XDG_SEAT")) |seat| {
+        try pam.putEnvAlloc("XDG_SEAT", seat);
+    } else {
+        try pam.putEnv("XDG_SEAT=seat0");
+    }
+
     try pam.putEnv("XDG_SESSION_CLASS=user");
     try pam.openSession(.{});
 

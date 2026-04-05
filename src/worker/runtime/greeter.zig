@@ -64,8 +64,16 @@ pub const Greeter = struct {
             var vt_buf: [3]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
             try self.pam.putEnvAlloc("XDG_VTNR", vt_value);
+        } else if (std.posix.getenv("XDG_VTNR")) |vt_num| {
+            try self.pam.putEnvAlloc("XDG_VTNR", vt_num);
         }
-        try self.pam.putEnv("XDG_SEAT=seat0");
+
+        if (std.posix.getenv("XDG_SEAT")) |seat| {
+            try self.pam.putEnvAlloc("XDG_SEAT", seat);
+        } else {
+            try self.pam.putEnv("XDG_SEAT=seat0");
+        }
+
         try self.pam.putEnv("XDG_SESSION_CLASS=greeter");
         try self.pam.openSession(.{});
         var envmap = try self.pam.createEnvListMap();

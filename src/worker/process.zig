@@ -37,6 +37,12 @@ pub const WorkerProcess = struct {
         if (std.posix.getenv("TERM")) |term| {
             try worker_envmap.put("TERM", term);
         }
+        if (std.posix.getenv("XDG_SEAT")) |seat| {
+            try worker_envmap.put("XDG_SEAT", seat);
+        }
+        if (std.posix.getenv("XDG_VTNR")) |vtnr| {
+            try worker_envmap.put("XDG_VTNR", vtnr);
+        }
         var vt_buf: [8]u8 = undefined;
         const vt_value = switch (opts.config.vt) {
             .unmanaged => "unmanaged",
