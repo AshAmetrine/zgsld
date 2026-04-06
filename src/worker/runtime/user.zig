@@ -10,9 +10,6 @@ pub const UserInfo = struct {
 };
 
 pub fn dropPrivileges(user_info: UserInfo) !void {
-    if (comptime builtin.os.tag != .linux and builtin.os.tag != .freebsd) {
-        return error.UnsupportedPlatform;
-    }
     if (initgroups(user_info.username, user_info.gid) != 0) {
         return std.posix.unexpectedErrno(std.posix.errno(-1));
     }
