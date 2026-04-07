@@ -67,6 +67,8 @@
               zig
               zls
               linux-pam
+              mkdocs
+              python3Packages.mkdocs-material
               zon2nix
             ];
           };

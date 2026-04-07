@@ -1,0 +1,29 @@
+site_name: zgsld
+theme: 
+  name: material
+  features:
+      - content.code.copy
+      - navigation.footer
+      - navigation.sections
+  icon:
+    repo: fontawesome/brands/github
+
+repo_name: ashametrine/zgsld
+repo_url: https://github.com/ashametrine/zgsld
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+nav:
+  - Getting Started: 
+    - Installation: index.md
+    - Greeters: greeters.md
+    - Configuration: configuration.md
+  - Greeter Development: 
+    - Getting Started: greeter-development.md
