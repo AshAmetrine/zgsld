@@ -91,7 +91,6 @@ sudo mkdir -p /etc/zgsld /etc/pam.d
 
 sudo cp res/zgsld.ini /etc/zgsld/zgsld.ini
 sudo cp res/pam.d/zgsld /etc/pam.d/zgsld
-sudo cp res/pam.d/zgsld-greeter /etc/pam.d/zgsld-greeter
 ```
 
 #### Install Service File
