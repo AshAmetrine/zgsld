@@ -17,7 +17,6 @@ pub const WorkerProcess = struct {
     pub const SpawnOpts = struct {
         allocator: std.mem.Allocator,
         worker_path: [:0]const u8,
-        greeter_cmd: if (build_options.standalone) []const u8 else void,
         config: Config,
         session_class: SessionClass,
         ipc_fd: ?std.posix.fd_t,
@@ -71,12 +70,9 @@ pub const WorkerProcess = struct {
         var greeter_user_z: ?[*:0]const u8 = null;
         switch (opts.session_class) {
             .greeter => {
-                const greeter_cmd_str: []const u8 = if (build_options.standalone) blk: {
-                    if (opts.greeter_cmd.len == 0) return error.NullGreeterCmd;
-                    break :blk opts.greeter_cmd;
-                } else if (opts.config.greeter.command) |cmd| blk: {
+                const greeter_cmd_str: []const u8 = if (opts.config.greeter.command) |cmd| blk: {
                     if (cmd.len == 0) return error.NullGreeterCmd;
-                    break :blk cmd;
+                    break :blk cmd; 
                 } else return error.NullGreeterCmd;
 
                 try worker_envmap.put(

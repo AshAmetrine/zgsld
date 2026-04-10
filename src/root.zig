@@ -144,23 +144,30 @@ pub const Zgsld = struct {
         log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
         log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
 
-        const argv = std.os.argv;
+        const args = std.os.argv[1..];
         var cmd_buf: std.ArrayList(u8) = .empty;
         defer cmd_buf.deinit(self.allocator);
 
-        for (argv, 0..) |arg, i| {
-            if (i != 0) {
+        if (zgsld_config.greeter.command) |greeter_wrapper| {
+            try cmd_buf.appendSlice(self.allocator, greeter_wrapper);
+            if (greeter_wrapper.len != 0 and greeter_wrapper[greeter_wrapper.len - 1] != ' ') {
                 try cmd_buf.append(self.allocator, ' ');
             }
+        }
+
+        try appendShellQuotedArg(&cmd_buf, self.allocator, self_exe_path);
+        for (args) |arg| {
+            try cmd_buf.append(self.allocator, ' ');
             try appendShellQuotedArg(&cmd_buf, self.allocator, std.mem.span(arg));
         }
-        const greeter_cmd = cmd_buf.items;
+
+        const greeter_cmd = try cmd_buf.toOwnedSliceSentinel(self.allocator, 0);
+        zgsld_config.greeter.command = greeter_cmd;
         log.debug("Greeter Cmd: {s}", .{greeter_cmd});
 
         try session_manager.run(.{
             .allocator = self.allocator,
             .self_exe_path = self_exe_path_z,
-            .greeter_cmd = greeter_cmd,
             .config = zgsld_config,
         });
     }

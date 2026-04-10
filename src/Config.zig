@@ -2,7 +2,6 @@
 //!
 //! The concrete field types depend on build options:
 //! - `x11` is `void` when built without `-Dx11`.
-//! - `greeter_cmd` is `void` for standalone greeter builds.
 
 const build_options = @import("build_options");
 const Ipc = @import("Ipc");
@@ -23,9 +22,8 @@ const GreeterConfig = struct {
     /// Session backend used to run the greeter process.
     session_type: Ipc.SessionType = .command,
 
-    /// Greeter command for zgsld to run (`void` in standalone greeter mode).
-    command: if (!build_options.standalone) ?[:0]const u8 else void =
-        if (!build_options.standalone) null else {},
+    /// Greeter command for zgsld to run (acts as a wrapper in standalone greeter mode).
+    command: ?[:0]const u8 = null,
 };
 
 const SessionConfig = struct {

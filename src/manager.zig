@@ -28,7 +28,6 @@ pub const SessionManagerRunOpts = if (build_options.standalone)
     struct {
         allocator: std.mem.Allocator,
         self_exe_path: [:0]const u8,
-        greeter_cmd: []const u8,
         config: Config,
     }
 else
@@ -65,11 +64,9 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         defer opts.config.vt.normalize() catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
 
-        const greeter_cmd = if (build_options.standalone) opts.greeter_cmd else {};
         const spawned = try spawnWorkers(.{
             .allocator = opts.allocator,
             .worker_path = opts.self_exe_path,
-            .greeter_cmd = greeter_cmd,
             .config = opts.config,
         });
 
@@ -92,7 +89,6 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 const SpawnWorkersOpts = struct {
     allocator: std.mem.Allocator,
     worker_path: [:0]const u8,
-    greeter_cmd: if (build_options.standalone) []const u8 else void,
     config: Config,
 };
 
@@ -106,7 +102,6 @@ fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
         break :blk try worker.WorkerProcess.spawn(.{
             .allocator = opts.allocator,
             .worker_path = opts.worker_path,
-            .greeter_cmd = opts.greeter_cmd, // ignored
             .config = opts.config,
             .session_class = .user,
             .ipc_fd = session_socks.child,
@@ -126,7 +121,6 @@ fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
         break :blk try worker.WorkerProcess.spawn(.{
             .allocator = opts.allocator,
             .worker_path = opts.worker_path,
-            .greeter_cmd = opts.greeter_cmd,
             .config = opts.config,
             .session_class = .greeter,
             .ipc_fd = greeter_socks.child,
@@ -205,11 +199,9 @@ const SpawnAutologinWorkerOpts = struct {
 
 fn spawnAutologinWorker(opts: SpawnAutologinWorkerOpts) !worker.WorkerProcess {
     log.debug("Spawning Autologin worker...", .{});
-    const greeter_cmd = if (build_options.standalone) "" else {};
     return worker.WorkerProcess.spawn(.{
         .allocator = opts.allocator,
         .worker_path = opts.worker_path,
-        .greeter_cmd = greeter_cmd,
         .config = opts.config,
         .session_class = .autologin,
         .ipc_fd = null,
