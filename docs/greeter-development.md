@@ -41,6 +41,8 @@ This is useful when the greeter wants to own the complete entrypoint while still
 
 ## API
 
+For the full API reference, see the [generated Zig docs](../zig/).
+
 ### Zgsld.init
 
 In your `main()` function, you will want to `init` the `Zgsld` struct and then call the `run` function:
