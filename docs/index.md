@@ -87,7 +87,7 @@ sudo cp zig-out/bin/zgsld /usr/local/bin/zgsld
 The repository ships example configuration, PAM, and service files in `res/`.
 
 ```sh
-sudo mkdir -p /etc/zgsld /etc/pam.d
+sudo mkdir /etc/zgsld
 
 sudo cp res/zgsld.ini /etc/zgsld/zgsld.ini
 sudo cp res/pam.d/zgsld /etc/pam.d/zgsld
