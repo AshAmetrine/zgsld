@@ -1,7 +1,7 @@
 const std = @import("std");
 const utils = @import("../user.zig");
 const UserInfo = utils.UserInfo;
-const Config = @import("../../../Config.zig");
+const Vt = @import("vt").Vt;
 const tty = @import("../tty.zig");
 
 pub const xauth = @import("xauth.zig");
@@ -12,7 +12,7 @@ const XServerOpts = struct {
     x_cmd: [:0]const u8,
     xauth_path: [:0]const u8,
     display: u8,
-    vt: Config.Vt,
+    vt: Vt,
     user: ?UserInfo,
     environ: [:null]const ?[*:0]const u8,
 };

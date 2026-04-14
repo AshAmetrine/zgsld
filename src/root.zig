@@ -2,19 +2,17 @@ const std = @import("std");
 const build_options = @import("build_options");
 const fd_utils = @import("fd.zig");
 const logging = @import("logging.zig");
-const session_manager = if (build_options.standalone) @import("manager.zig");
-const worker = if (build_options.standalone) @import("worker.zig");
 const preview_mod = @import("preview.zig");
 
 pub const preview = preview_mod.types;
-
-const log = std.log.scoped(.zgsld);
-
+pub const daemon = @import("daemon.zig");
 pub const initZgsldLog = logging.initZgsldLog;
 pub const logFn = logging.logFn;
-
+pub const Config = @import("Config.zig");
 pub const Ipc = @import("Ipc");
+
 const IpcConnection = Ipc.Connection;
+const log = std.log.scoped(.zgsld);
 
 fn appendShellQuotedArg(
     buf: *std.ArrayList(u8),
@@ -35,8 +33,6 @@ fn appendShellQuotedArg(
 pub const Zgsld = struct {
     allocator: std.mem.Allocator,
     vtable: *const VTable,
-
-    pub const Config = @import("Config.zig");
 
     /// Context passed to `VTable.run`.
     pub const GreeterContext = struct {
@@ -65,6 +61,7 @@ pub const Zgsld = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator, vtable: *const VTable) Zgsld {
+
         return .{
             .allocator = allocator,
             .vtable = vtable,
@@ -72,9 +69,8 @@ pub const Zgsld = struct {
     }
 
     pub fn run(self: Zgsld) !void {
-        if (build_options.standalone and worker.isSessionWorker()) {
-            var runtime = worker.WorkerRuntime.init(.{ .allocator = self.allocator });
-            try runtime.run();
+        if (build_options.standalone and daemon.worker.isSessionWorker()) {
+            try daemon.worker.WorkerRuntime.run(self.allocator);
             return;
         }
 
@@ -165,7 +161,7 @@ pub const Zgsld = struct {
         zgsld_config.greeter.command = greeter_cmd;
         log.debug("Greeter Cmd: {s}", .{greeter_cmd});
 
-        try session_manager.run(.{
+        try daemon.session_manager.run(.{
             .allocator = self.allocator,
             .self_exe_path = self_exe_path_z,
             .config = zgsld_config,

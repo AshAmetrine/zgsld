@@ -4,7 +4,7 @@ const pam_mod = @import("pam");
 const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
-const Config = @import("../../Config.zig");
+const Vt = @import("vt").Vt;
 
 const Pam = pam_mod.Pam;
 const PamCtx = pam_conv.PamCtx;
@@ -22,7 +22,7 @@ pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     service_name: []const u8,
     ipc_conn: *Ipc.Connection,
-    vt: Config.Vt,
+    vt: Vt,
 };
 
 const SessionSetup = struct {
@@ -192,7 +192,7 @@ fn runSession(
     info: Ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.EnvMap,
-    vt: Config.Vt,
+    vt: Vt,
 ) !void {
     log.debug("Starting session...", .{});
     try vt.activate();

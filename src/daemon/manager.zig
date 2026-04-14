@@ -1,10 +1,9 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
-const SocketPair = @import("SocketPair.zig");
-const vt = @import("vt");
+const SocketPair = @import("../SocketPair.zig");
 const worker = @import("worker.zig");
 const log = std.log.scoped(.zgsld);
-const Config = @import("Config.zig");
+const Config = @import("../Config.zig");
 const build_options = @import("build_options");
 
 var greeter_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
@@ -24,18 +23,11 @@ const SpawnedWorkers = struct {
     greeter_fd: std.posix.fd_t,
 };
 
-pub const SessionManagerRunOpts = if (build_options.standalone)
-    struct {
-        allocator: std.mem.Allocator,
-        self_exe_path: [:0]const u8,
-        config: Config,
-    }
-else
-    struct {
-        allocator: std.mem.Allocator,
-        self_exe_path: [:0]const u8,
-        config: Config,
-    };
+pub const SessionManagerRunOpts = struct {
+    allocator: std.mem.Allocator,
+    self_exe_path: [:0]const u8,
+    config: Config,
+};
 
 pub fn run(opts: SessionManagerRunOpts) !void {
     installSignalHandlers();

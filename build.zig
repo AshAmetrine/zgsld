@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     const vt_mod = b.createModule(.{
-        .root_source_file = b.path("src/vt.zig"),
+        .root_source_file = b.path("src/daemon/vt.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    if (standalone) zgsld_mod.addImport("pam", pam.module("pam"));
+    if (b.pkg_hash.len == 0 or standalone) zgsld_mod.addImport("pam", pam.module("pam"));
 
     const test_step = b.step("test", "Run all tests.");
     const tests = b.addTest(.{ .root_module = zgsld_mod });
@@ -88,10 +88,8 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "build_options", .module = build_options_mod },
                 .{ .name = "clap", .module = clap.module("clap") },
-                .{ .name = "Ipc", .module = ipc_mod },
                 .{ .name = "zigini", .module = zigini.module("zigini") },
-                .{ .name = "pam", .module = pam.module("pam") },
-                .{ .name = "vt", .module = vt_mod },
+                .{ .name = "zgsld", .module = zgsld_mod },
             },
             .link_libc = true,
         }),

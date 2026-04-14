@@ -4,7 +4,7 @@ const env_mod = @import("env.zig");
 const pam_mod = @import("pam");
 const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
-const Config = @import("../../Config.zig");
+const Vt = @import("vt").Vt;
 
 const Pam = pam_mod.Pam;
 const Session = session_mod.Session;
@@ -12,7 +12,7 @@ const Session = session_mod.Session;
 pub const GreeterOpts = struct {
     username: [:0]const u8,
     service_name: []const u8,
-    vt: Config.Vt,
+    vt: Vt,
 };
 
 pub const Greeter = struct {
@@ -52,7 +52,7 @@ pub const Greeter = struct {
         ipc_fd: std.posix.fd_t,
         greeter_cmd: []const u8,
         session_type: Ipc.SessionType,
-        vt: Config.Vt,
+        vt: Vt,
     ) !std.posix.pid_t {
         try vt.activate();
 

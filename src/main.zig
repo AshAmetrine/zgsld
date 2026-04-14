@@ -1,15 +1,15 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const session_manager = @import("manager.zig");
-const worker = @import("worker.zig");
-const Config = @import("Config.zig");
+const zgsld = @import("zgsld");
+const Config = zgsld.Config;
+const daemon = zgsld.daemon;
 
 const clap = @import("clap");
 const zigini = @import("zigini");
 
 const log = std.log.scoped(.zgsld);
 
-pub const std_options: std.Options = .{ .logFn = @import("logging.zig").logFn };
+pub const std_options: std.Options = .{ .logFn = zgsld.logFn };
 
 const clap_param_str =
     \\-h, --help                Shows all commands.
@@ -21,9 +21,8 @@ const clap_param_str =
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
-    if (worker.isSessionWorker()) {
-        var runtime = worker.WorkerRuntime.init(.{ .allocator = allocator });
-        try runtime.run();
+    if (daemon.worker.isSessionWorker()) {
+        try daemon.worker.WorkerRuntime.run(allocator);
         return;
     }
 
@@ -72,7 +71,7 @@ pub fn main() !void {
     self_exe_path_buf[self_exe_path.len] = 0;
     const self_exe_path_z = self_exe_path_buf[0..self_exe_path.len :0];
 
-    try session_manager.run(.{
+    try daemon.session_manager.run(.{
         .allocator = allocator,
         .self_exe_path = self_exe_path_z,
         .config = config,

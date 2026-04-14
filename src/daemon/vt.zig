@@ -215,7 +215,7 @@ pub const Vt = union(enum) {
     };
 };
 
-pub fn getInheritedTtyDevicePath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
+fn getInheritedTtyDevicePath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     const inherited_fds = [_]std.posix.fd_t{
         std.posix.STDIN_FILENO,
         std.posix.STDOUT_FILENO,
@@ -231,7 +231,7 @@ pub fn getInheritedTtyDevicePath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 
     return error.NoInheritedTty;
 }
 
-pub fn getTtyDevicePath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![:0]const u8 {
+fn getTtyDevicePath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![:0]const u8 {
     if (target_vt == 0) return error.InvalidTty;
 
     return switch (builtin.os.tag) {

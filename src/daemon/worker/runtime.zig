@@ -1,27 +1,17 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
-const fd_utils = @import("../fd.zig");
+const fd_utils = @import("../../fd.zig");
 const autologin = @import("runtime/autologin.zig");
 const greeter_mod = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
-const Config = @import("../Config.zig");
+const Vt = @import("vt").Vt;
 const SessionClass = @import("process.zig").SessionClass;
 
 const Greeter = greeter_mod.Greeter;
 
-pub const WorkerRuntimeOpts = struct {
-    allocator: std.mem.Allocator,
-};
-
 pub const WorkerRuntime = struct {
-    allocator: std.mem.Allocator,
-
-    pub fn init(opts: WorkerRuntimeOpts) WorkerRuntime {
-        return .{ .allocator = opts.allocator };
-    }
-
-    pub fn run(self: WorkerRuntime) !void {
+    pub fn run(allocator: std.mem.Allocator) !void {
         signals.installHandlers();
 
         const argv = std.os.argv;
@@ -33,7 +23,7 @@ pub const WorkerRuntime = struct {
 
         const service = std.mem.span(argv[3]);
 
-        const vt = try Config.Vt.parse(std.posix.getenv("ZGSLD_VT"));
+        const vt = try Vt.parse(std.posix.getenv("ZGSLD_VT"));
 
         switch (session_class) {
             .greeter => {
@@ -43,7 +33,7 @@ pub const WorkerRuntime = struct {
                 const greeter_session_type_raw = std.posix.getenv("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
                 const greeter_session_type = std.meta.stringToEnum(Ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
 
-                var greeter = try Greeter.init(self.allocator, .{
+                var greeter = try Greeter.init(allocator, .{
                     .service_name = service,
                     .username = greeter_username,
                     .vt = vt,
@@ -69,7 +59,7 @@ pub const WorkerRuntime = struct {
 
                 var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
                 try login.run(.{
-                    .allocator = self.allocator,
+                    .allocator = allocator,
                     .service_name = service,
                     .ipc_conn = &ipc_conn,
                     .vt = vt,
@@ -82,7 +72,7 @@ pub const WorkerRuntime = struct {
                 const autologin_cmd = std.posix.getenv("ZGSLD_AUTOLOGIN_CMD") orelse return error.MissingAutologinCmd;
 
                 try autologin.run(.{
-                    .allocator = self.allocator,
+                    .allocator = allocator,
                     .service_name = service,
                     .user = autologin_user,
                     .info = .{

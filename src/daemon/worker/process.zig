@@ -1,7 +1,7 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const build_options = @import("build_options");
-const Config = @import("../Config.zig");
+const Config = @import("../../Config.zig");
 
 const log = std.log.scoped(.zgsld);
 
