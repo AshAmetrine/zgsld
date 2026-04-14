@@ -66,7 +66,16 @@ pub fn build(b: *std.Build) !void {
 
     const docs_obj = b.addObject(.{
         .name = "root",
-        .root_module = zgsld_mod,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "build_options", .module = build_options_mod },
+                .{ .name = "Ipc", .module = ipc_mod },
+                .{ .name = "vt", .module = vt_mod },
+            },
+        }),
     });
     const docs_install = b.addInstallDirectory(.{
         .source_dir = docs_obj.getEmittedDocs(),
