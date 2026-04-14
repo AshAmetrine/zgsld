@@ -8,17 +8,20 @@
         .clap = .{
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
             .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+            .lazy = true,
         },
 
         .zigini = .{
             .url = "git+https://github.com/ashametrine/zigini#fe98c40f646aada9e68fcc955180929628cad3f6",
             .hash = "zigini-0.4.0-BSkB7eJUAAD0Nt14fV482O8qNxsW8h_6BCTUIulluojv",
+            .lazy = true,
         },
 
         // Lib Dependencies
         .zig_pam = .{
             .url = "git+https://github.com/ashametrine/zig-pam#8b547dbc87e8cb959440d98bc39e7792cbf65015",
             .hash = "zig_pam-0.1.0--cHVhttYAAAZqSMtkuDM1YHlw7VVCtgmMsz5lSg9B8ez",
+            .lazy = true,
         },
     },
     .paths = .{
