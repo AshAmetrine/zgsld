@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const posix = @import("posix");
 const build_options = @import("build_options");
 const Config = @import("../../Config.zig");
 
@@ -16,6 +17,7 @@ pub const WorkerProcess = struct {
 
     pub const SpawnOpts = struct {
         allocator: std.mem.Allocator,
+        env_map: *const std.process.Environ.Map,
         worker_path: [:0]const u8,
         config: Config,
         session_class: SessionClass,
@@ -27,20 +29,20 @@ pub const WorkerProcess = struct {
         defer arena.deinit();
         const arena_allocator = arena.allocator();
 
-        var worker_envmap = std.process.EnvMap.init(arena_allocator);
+        var worker_envmap = std.process.Environ.Map.init(arena_allocator);
         defer worker_envmap.deinit();
 
-        if (std.posix.getenv("PATH")) |path| {
+        if (opts.env_map.get("PATH")) |path| {
             try worker_envmap.put("PATH", path);
         }
-        if (std.posix.getenv("TERM")) |term| {
+        if (opts.env_map.get("TERM")) |term| {
             try worker_envmap.put("TERM", term);
         }
-        if (std.posix.getenv("XDG_SEAT")) |seat| {
+        if (opts.env_map.get("XDG_SEAT")) |seat| {
             try worker_envmap.put("XDG_SEAT", seat);
         }
         if (opts.config.vt == .unmanaged) {
-            if (std.posix.getenv("XDG_VTNR")) |vtnr| {
+            if (opts.env_map.get("XDG_VTNR")) |vtnr| {
                 try worker_envmap.put("XDG_VTNR", vtnr);
             }
         }
@@ -96,7 +98,7 @@ pub const WorkerProcess = struct {
             .user => {},
         }
 
-        const worker_environ = try std.process.createNullDelimitedEnvMap(arena_allocator, &worker_envmap);
+        const worker_environ = try worker_envmap.createPosixBlock(arena_allocator, .{});
 
         const service_name_z = try arena_allocator.dupeZ(u8, service_name);
 
@@ -108,20 +110,22 @@ pub const WorkerProcess = struct {
             greeter_user_z,
         };
 
-        const pid = try std.posix.fork();
+        const pid = blk: {
+            const child_pid = std.c.fork();
+            if (child_pid < 0) return std.posix.unexpectedErrno(std.c.errno(child_pid));
+            break :blk child_pid;
+        };
         if (pid == 0) {
-            std.posix.execvpeZ(opts.worker_path, &argv, worker_environ) catch {
-                log.err("Worker exec error\n", .{});
-            };
+            _ = std.c.execve(opts.worker_path, &argv, worker_environ.slice.ptr);
+            log.err("Worker exec error\n", .{});
             std.process.exit(1);
         }
         return .{ .pid = pid };
     }
 
     pub fn wait(self: WorkerProcess) !void {
-        const status = std.posix.waitpid(self.pid, 0);
-
-        const st = status.status;
+        const result = try posix.waitpid(self.pid, 0);
+        const st = result.status;
         const code: u8 = if (std.c.W.IFEXITED(st)) std.c.W.EXITSTATUS(st) else 1;
 
         if (code != 0) {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const posix = @import("posix");
 const env_mod = @import("env.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
@@ -10,6 +11,8 @@ const Pam = pam_mod.Pam;
 
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
+    env_map: *const std.process.Environ.Map,
     service_name: []const u8,
     user: [:0]const u8,
     info: Ipc.SessionInfo,
@@ -25,27 +28,29 @@ pub fn run(opts: RunOpts) !void {
     defer pam.deinit();
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    if (try opts.vt.resolveTtyDevicePath(&tty_path_buf)) |tty_path| {
+    if (try opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf)) |tty_path| {
         try pam.setItem(.{ .tty = tty_path });
     }
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 
-    var session_envmap = std.process.EnvMap.init(opts.allocator);
+    var session_envmap = std.process.Environ.Map.init(opts.allocator);
     defer session_envmap.deinit();
     if (opts.info.session_type == .x11) {
         try session_envmap.put("XDG_SESSION_TYPE", "x11");
     }
-    try opts.vt.activate();
+    try opts.vt.activate(opts.io);
 
-    var tty_file = try opts.vt.openDevice(.read_write);
-    defer if (tty_file.handle > 2) tty_file.close();
+    var tty_file = try opts.vt.openDevice(opts.io, opts.env_map, .read_write);
+    defer if (tty_file.handle > 2) tty_file.close(opts.io);
     try opts.vt.establishSessionControllingTty(tty_file.handle);
 
-    try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.vt);
-    try env_mod.applyTermEnv(&session_envmap);
+    try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.io, opts.env_map, opts.vt);
+    try env_mod.applyTermEnv(&session_envmap, opts.env_map);
     const user_info = try env_mod.applyUserEnv(&session_envmap, opts.user);
     var session = try session_mod.Session.spawn(opts.allocator, .{
+        .io = opts.io,
+        .host_env_map = opts.env_map,
         .session_info = opts.info,
         .envmap = &session_envmap,
         .user_info = user_info,
@@ -59,5 +64,5 @@ pub fn run(opts: RunOpts) !void {
     if (signals.shutdownRequested()) {
         signals.forwardShutdownSignal(signals.shutdownSignal());
     }
-    _ = std.posix.waitpid(session.pid, 0);
+    _ = try posix.waitpid(session.pid, 0);
 }

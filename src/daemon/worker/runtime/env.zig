@@ -7,7 +7,9 @@ const Vt = @import("vt").Vt;
 pub fn applyPamUserSessionEnv(
     comptime T: type,
     pam: *Pam(T),
-    session_envmap: *std.process.EnvMap,
+    session_envmap: *std.process.Environ.Map,
+    io: std.Io,
+    host_env_map: *const std.process.Environ.Map,
     vt: Vt,
 ) !void {
     if (session_envmap.get("XDG_CURRENT_DESKTOP")) |v| {
@@ -20,13 +22,13 @@ pub fn applyPamUserSessionEnv(
         try pam.putEnvAlloc("XDG_SESSION_TYPE", v);
     }
 
-    if (vt.ttyNumber()) |vt_num| {
+    if (vt.ttyNumber(io, host_env_map)) |vt_num| {
         var vt_buf: [3]u8 = undefined;
         const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
         try pam.putEnvAlloc("XDG_VTNR", vt_value);
     }
 
-    if (std.posix.getenv("XDG_SEAT")) |seat| {
+    if (host_env_map.get("XDG_SEAT")) |seat| {
         try pam.putEnvAlloc("XDG_SEAT", seat);
     } else {
         try pam.putEnv("XDG_SEAT=seat0");
@@ -39,7 +41,7 @@ pub fn applyPamUserSessionEnv(
     try pam.addEnvListToMap(session_envmap);
 }
 
-pub fn applyUserEnv(session_envmap: *std.process.EnvMap, user: [:0]const u8) !UserInfo {
+pub fn applyUserEnv(session_envmap: *std.process.Environ.Map, user: [:0]const u8) !UserInfo {
     const pw = std.c.getpwnam(user) orelse return error.UserUnknown;
 
     if (pw.dir) |home_dir| {
@@ -61,10 +63,10 @@ pub fn applyUserEnv(session_envmap: *std.process.EnvMap, user: [:0]const u8) !Us
     };
 }
 
-pub fn applyTermEnv(session_envmap: *std.process.EnvMap) !void {
+pub fn applyTermEnv(session_envmap: *std.process.Environ.Map, host_env_map: *const std.process.Environ.Map) !void {
     if (session_envmap.get("TERM") != null) return;
 
-    if (std.posix.getenv("TERM")) |term| {
+    if (host_env_map.get("TERM")) |term| {
         try session_envmap.put("TERM", term);
         return;
     }

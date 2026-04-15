@@ -105,31 +105,34 @@ pub const Event = union(EventType) {
 pub const Connection = struct {
     const Self = @This();
 
-    file: std.fs.File,
+    file: std.Io.File,
 
     /// Initializes a connection from an owned file handle.
-    pub fn init(file: std.fs.File) Self {
+    pub fn init(file: std.Io.File) Self {
         return .{ .file = file };
     }
 
     /// Initializes a connection from an fd.
     pub fn initFromFd(fd: std.posix.fd_t) Self {
-        return init(std.fs.File{ .handle = fd });
+        return init(.{
+            .handle = fd,
+            .flags = .{ .nonblocking = false },
+        });
     }
 
     /// Closes the underlying socket/file.
-    pub fn deinit(self: *Self) void {
-        self.file.close();
+    pub fn deinit(self: *Self, io: std.Io) void {
+        self.file.close(io);
     }
 
     /// Creates a buffered file reader using caller-provided buffer.
-    pub fn reader(self: *Self, buffer: []u8) std.fs.File.Reader {
-        return self.file.reader(buffer);
+    pub fn reader(self: *Self, io: std.Io, buffer: []u8) std.Io.File.Reader {
+        return self.file.reader(io, buffer);
     }
 
     /// Creates a buffered file writer using caller-provided buffer.
-    pub fn writer(self: *Self, buffer: []u8) std.fs.File.Writer {
-        return self.file.writer(buffer);
+    pub fn writer(self: *Self, io: std.Io, buffer: []u8) std.Io.File.Writer {
+        return self.file.writer(io, buffer);
     }
 
     fn readHeader(io_reader: *std.Io.Reader) !struct { tag: EventType, payload_len: usize } {

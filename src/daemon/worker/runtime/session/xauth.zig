@@ -46,6 +46,7 @@ fn mcookie() [Md5.digest_length]u8 {
 }
 
 pub fn createXauthEntry(
+    io: std.Io,
     path_buf: []u8,
     display_num: []const u8,
     uid: std.posix.uid_t,
@@ -54,8 +55,8 @@ pub fn createXauthEntry(
 ) ![]const u8 {
     if (display_num.len == 0) return error.InvalidDisplay;
 
-    const xauth_file = try createUniqueXauthFile(path_buf, uid, gid, runtime_dir);
-    errdefer _ = std.fs.deleteFileAbsolute(xauth_file.path) catch {};
+    const xauth_file = try createUniqueXauthFile(io, path_buf, uid, gid, runtime_dir);
+    errdefer std.Io.Dir.deleteFileAbsolute(io, xauth_file.path) catch {};
     defer xauth_file.file.close();
 
     const magic_cookie = mcookie();
@@ -124,6 +125,7 @@ const CreatedXauthFile = struct {
 /// Finds a suitable dir to store the Xauth file,
 /// then creates the file with a unique id.
 fn createUniqueXauthFile(
+    io: std.Io,
     path_buf: []u8,
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
@@ -151,7 +153,7 @@ fn createUniqueXauthFile(
         };
         errdefer {
             file.close();
-            std.fs.deleteFileAbsolute(xauthority) catch {};
+            std.Io.Dir.deleteFileAbsolute(io, xauthority) catch {};
         }
         try file.chown(uid, gid);
         return .{

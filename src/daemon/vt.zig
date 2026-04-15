@@ -1,14 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @cImport({
-    @cInclude("sys/ioctl.h");
-    if (builtin.os.tag == .linux) {
-        @cInclude("linux/vt.h");
-        @cInclude("linux/kd.h");
-    } else if (builtin.os.tag == .freebsd) {
-        @cInclude("sys/consio.h");
-    }
-});
+const c = @import("c");
+
 const log = std.log.scoped(.zgsld);
 extern "c" fn getsid(pid: std.posix.pid_t) std.posix.pid_t;
 extern "c" fn ttyname_r(fd: std.posix.fd_t, buf: [*]u8, buflen: usize) c_int;
@@ -31,29 +24,29 @@ pub const Vt = union(enum) {
         return .{ .number = number };
     }
 
-    pub fn ttyNumber(self: Vt) ?u8 {
+    pub fn ttyNumber(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) ?u8 {
         return switch (self) {
             .number => |vt_num| vt_num,
-            .current => queryCurrentTtyNumber() catch blk: {
+            .current => queryCurrentTtyNumber(io) catch blk: {
                 var path_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const tty_path = getInheritedTtyDevicePath(&path_buf) catch break :blk null;
                 break :blk parseTtyNumberFromPath(tty_path) catch null;
             },
             .unmanaged => blk: {
-                const raw = std.posix.getenv("XDG_VTNR") orelse break :blk null;
+                const raw = env_map.get("XDG_VTNR") orelse break :blk null;
                 break :blk std.fmt.parseInt(u8, raw, 10) catch null;
             },
         };
     }
 
-    pub fn activate(self: Vt) !void {
+    pub fn activate(self: Vt, io: std.Io) !void {
         const vt_num = switch (self) {
             .number => |vt_num| vt_num,
             .unmanaged, .current => return,
         };
 
-        var console = try openVtControlDevice();
-        defer console.close();
+        var console = try openVtControlDevice(io);
+        defer console.close(io);
 
         if (comptime builtin.os.tag == .linux) {
             var setactivate = std.mem.zeroes(c.struct_vt_setactivate);
@@ -75,20 +68,25 @@ pub const Vt = union(enum) {
         if (wait_status != 0) return error.FailedToWaitForActiveTty;
     }
 
-    pub fn open(self: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
+    pub fn open(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.File.OpenMode) !std.Io.File {
         return switch (self) {
-            .unmanaged, .current => openControllingTty(mode),
-            .number => self.openDevice(mode),
+            .unmanaged, .current => openControllingTty(io, mode),
+            .number => self.openDevice(io, env_map, mode),
         };
     }
 
-    pub fn openDevice(self: Vt, mode: std.fs.File.OpenMode) !std.fs.File {
+    pub fn openDevice(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.File.OpenMode) !std.Io.File {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = (try self.resolveTtyDevicePath(&path_buf)) orelse return error.InvalidTtyPath;
-        return try std.fs.openFileAbsolute(tty_path, .{ .mode = mode });
+        const tty_path = (try self.resolveTtyDevicePath(io, env_map, &path_buf)) orelse return error.InvalidTtyPath;
+        return try std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = mode });
     }
 
-    pub fn resolveTtyDevicePath(self: Vt, buf: *[std.fs.max_path_bytes]u8) !?[:0]const u8 {
+    pub fn resolveTtyDevicePath(
+        self: Vt,
+        io: std.Io,
+        env_map: *const std.process.Environ.Map,
+        buf: *[std.fs.max_path_bytes]u8,
+    ) !?[:0]const u8 {
         switch (self) {
             .number => |vt_num| {
                 if (getTtyDevicePath(buf, vt_num)) |tty_path| {
@@ -98,7 +96,7 @@ pub const Vt = union(enum) {
                 }
             },
             .current => {
-                if (queryCurrentTtyNumber()) |vt_num| {
+                if (queryCurrentTtyNumber(io)) |vt_num| {
                     if (getTtyDevicePath(buf, vt_num)) |tty_path| {
                         return tty_path;
                     } else |err| {
@@ -108,7 +106,13 @@ pub const Vt = union(enum) {
                     log.warn("Failed to resolve current tty number: {s}", .{@errorName(err)});
                 }
             },
-            .unmanaged => {},
+            .unmanaged => if (self.ttyNumber(io, env_map)) |vt_num| {
+                if (getTtyDevicePath(buf, vt_num)) |tty_path| {
+                    return tty_path;
+                } else |err| {
+                    log.warn("Failed to resolve unmanaged tty device path: {s}", .{@errorName(err)});
+                }
+            },
         }
 
         if (getInheritedTtyDevicePath(buf)) |tty_path| {
@@ -120,18 +124,20 @@ pub const Vt = union(enum) {
         return error.InvalidTtyPath;
     }
 
-    pub fn normalize(self: Vt) !void {
+    pub fn normalize(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !void {
         switch (self) {
             .number => {
-                try self.activate();
-                try self.setTextMode();
-                self.resetTermios();
+                try self.activate(io);
+                try self.setTextMode(io, env_map);
+                self.resetTermios(io, env_map);
             },
             .current => {
-                try self.setTextMode();
-                self.resetTermios();
+                try self.setTextMode(io, env_map);
+                self.resetTermios(io, env_map);
             },
-            .unmanaged => self.resetTermios(),
+            .unmanaged => {
+                self.resetTermios(io, env_map);
+            },
         }
     }
 
@@ -143,25 +149,25 @@ pub const Vt = union(enum) {
         try attachControllingTty(fd);
     }
 
-    pub fn watchInput(self: Vt) !InputWatcher {
-        return InputWatcher.init(self);
+    pub fn watchInput(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !InputWatcher {
+        return InputWatcher.init(self, io, env_map);
     }
 
-    fn setTextMode(self: Vt) !void {
+    fn setTextMode(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !void {
         if (comptime builtin.os.tag != .linux) return;
 
-        var tty_file = try self.open(.read_write);
-        defer if (tty_file.handle > 2) tty_file.close();
+        var tty_file = try self.open(io, env_map, .read_write);
+        defer if (tty_file.handle > 2) tty_file.close(io);
 
         const status = c.ioctl(tty_file.handle, c.KDSETMODE, @as(c_int, c.KD_TEXT));
         if (status != 0) return error.FailedToSetTextMode;
     }
 
-    fn resetTermios(self: Vt) void {
-        var tty_file = self.open(.read_write) catch {
+    fn resetTermios(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) void {
+        var tty_file = self.open(io, env_map, .read_write) catch {
             return;
         };
-        defer if (tty_file.handle > 2) tty_file.close();
+        defer if (tty_file.handle > 2) tty_file.close(io);
 
         var termios = std.posix.tcgetattr(tty_file.handle) catch {
             return;
@@ -174,12 +180,12 @@ pub const Vt = union(enum) {
     }
 
     pub const InputWatcher = struct {
-        file: std.fs.File,
+        file: std.Io.File,
         original: std.posix.termios,
 
-        pub fn init(target_vt: Vt) !InputWatcher {
-            var tty_file = try target_vt.open(.read_write);
-            errdefer tty_file.close();
+        pub fn init(target_vt: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !InputWatcher {
+            var tty_file = try target_vt.open(io, env_map, .read_write);
+            errdefer tty_file.close(io);
 
             const original = try std.posix.tcgetattr(tty_file.handle);
             var raw = original;
@@ -197,9 +203,9 @@ pub const Vt = union(enum) {
             };
         }
 
-        pub fn deinit(self: *InputWatcher) void {
+        pub fn deinit(self: *InputWatcher, io: std.Io) void {
             std.posix.tcsetattr(self.file.handle, .FLUSH, self.original) catch {};
-            self.file.close();
+            self.file.close(io);
         }
 
         pub fn waitForInput(self: *InputWatcher, timeout_ms: u64) !bool {
@@ -249,10 +255,10 @@ fn ttyPathFromFd(fd: std.posix.fd_t, buf: *[std.fs.max_path_bytes]u8) ![:0]const
     return buf[0..tty_path.len :0];
 }
 
-fn queryCurrentTtyNumber() !u8 {
+fn queryCurrentTtyNumber(io: std.Io) !u8 {
     return switch (builtin.os.tag) {
-        .linux => linux.queryCurrentTtyNumber(),
-        .freebsd => freebsd.queryCurrentTtyNumber(),
+        .linux => linux.queryCurrentTtyNumber(io),
+        .freebsd => freebsd.queryCurrentTtyNumber(io),
         else => error.UnsupportedPlatform,
     };
 }
@@ -266,9 +272,9 @@ fn parseTtyNumberFromPath(tty_path: []const u8) !u8 {
 }
 
 const linux = struct {
-    fn queryCurrentTtyNumber() !u8 {
-        var tty_file = try openControllingTty(.read_only);
-        defer if (tty_file.handle > 2) tty_file.close();
+    fn queryCurrentTtyNumber(io: std.Io) !u8 {
+        var tty_file = try openControllingTty(io, .read_only);
+        defer if (tty_file.handle > 2) tty_file.close(io);
 
         var state = std.mem.zeroes(c.struct_vt_stat);
         const status = c.ioctl(tty_file.handle, c.VT_GETSTATE, &state);
@@ -291,9 +297,9 @@ const linux = struct {
 };
 
 const freebsd = struct {
-    fn queryCurrentTtyNumber() !u8 {
-        var tty_file = try openControllingTty(.read_only);
-        defer if (tty_file.handle > 2) tty_file.close();
+    fn queryCurrentTtyNumber(io: std.Io) !u8 {
+        var tty_file = try openControllingTty(io, .read_only);
+        defer if (tty_file.handle > 2) tty_file.close(io);
 
         var tty_index: c_int = 0;
         const status = c.ioctl(tty_file.handle, c.VT_GETINDEX, &tty_index);
@@ -315,16 +321,16 @@ const freebsd = struct {
     }
 };
 
-fn openVtControlDevice() !std.fs.File {
+fn openVtControlDevice(io: std.Io) !std.Io.File {
     return switch (builtin.os.tag) {
-        .linux => std.fs.openFileAbsolute("/dev/tty0", .{ .mode = .read_write }),
-        .freebsd => std.fs.openFileAbsolute("/dev/console", .{ .mode = .read_write }),
+        .linux => std.Io.Dir.openFileAbsolute(io, "/dev/tty0", .{ .mode = .read_write }),
+        .freebsd => std.Io.Dir.openFileAbsolute(io, "/dev/console", .{ .mode = .read_write }),
         else => error.UnsupportedPlatform,
     };
 }
 
-fn openControllingTty(mode: std.fs.File.OpenMode) !std.fs.File {
-    return std.fs.openFileAbsolute("/dev/tty", .{ .mode = mode });
+fn openControllingTty(io: std.Io, mode: std.Io.File.OpenMode) !std.Io.File {
+    return std.Io.Dir.openFileAbsolute(io, "/dev/tty", .{ .mode = mode });
 }
 
 fn controllingTtyIsCurrentSession(fd: std.posix.fd_t) bool {
@@ -336,10 +342,11 @@ fn controllingTtyIsCurrentSession(fd: std.posix.fd_t) bool {
 }
 
 fn becomeSessionLeader() !void {
-    _ = std.posix.setsid() catch |err| switch (err) {
-        error.PermissionDenied => {},
-        else => return err,
-    };
+    switch (std.c.errno(std.c.setsid())) {
+        .SUCCESS => {},
+        .PERM => {},
+        else => |err| return std.posix.unexpectedErrno(err),
+    }
 }
 
 fn attachControllingTty(fd: std.posix.fd_t) !void {

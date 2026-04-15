@@ -31,14 +31,30 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption([]const u8, "x11_cmd", x11_cmd);
     const build_options_mod = build_options.createModule();
 
-    const ipc_mod = b.createModule(.{
-        .root_source_file = b.path("src/Ipc.zig"),
+
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/c.h"),
         .target = target,
         .optimize = optimize,
     });
 
     const vt_mod = b.createModule(.{
         .root_source_file = b.path("src/daemon/vt.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "c", .module = translate_c.createModule() },
+        },
+    });
+
+    const ipc_mod = b.createModule(.{
+        .root_source_file = b.path("src/Ipc.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const posix_mod = b.createModule(.{
+        .root_source_file = b.path("src/posix.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -50,6 +66,7 @@ pub fn build(b: *std.Build) !void {
         .imports = &.{
             .{ .name = "build_options", .module = build_options_mod },
             .{ .name = "Ipc", .module = ipc_mod },
+            .{ .name = "posix", .module = posix_mod },
             .{ .name = "vt", .module = vt_mod },
         },
     });
@@ -73,6 +90,7 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "build_options", .module = build_options_mod },
                 .{ .name = "Ipc", .module = ipc_mod },
+                .{ .name = "posix", .module = posix_mod },
                 .{ .name = "vt", .module = vt_mod },
             },
         }),
@@ -126,11 +144,11 @@ fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) 
         "--match",
         "*.*.*",
         "--tags",
-    }, &status, .Ignore) catch {
+    }, &status, .ignore) catch {
         return version_str;
     };
     var git_describe = std.mem.trim(u8, git_describe_raw, " \n\r");
-    git_describe = std.mem.trimLeft(u8, git_describe, "v");
+    git_describe = std.mem.trimStart(u8, git_describe, "v");
 
     switch (std.mem.count(u8, git_describe, "-")) {
         0 => {
@@ -143,7 +161,7 @@ fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) 
         2 => {
             // Untagged development build (e.g. 0.10.0-dev.2025+ecf0050a9).
             var it = std.mem.splitScalar(u8, git_describe, '-');
-            const tagged_ancestor = std.mem.trimLeft(u8, it.first(), "v");
+            const tagged_ancestor = std.mem.trimStart(u8, it.first(), "v");
             const commit_height = it.next().?;
             const commit_id = it.next().?;
 

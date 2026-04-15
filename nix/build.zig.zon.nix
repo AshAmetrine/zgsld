@@ -4,17 +4,20 @@
 
 linkFarm "zig-packages" [
   {
-    name = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e";
-    path = fetchzip {
-      url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz";
-      hash = "sha256-XytqwtoE0xaR43YustgK68sAQPVfC0Dt+uCs8UTfkbU=";
+    name = "clap-0.11.0-oBajB7foAQC3Iyn4IVCkUdYaOVVng5IZkSncySTjNig1";
+    path = fetchgit {
+      url = "https://github.com/Hejsil/zig-clap";
+      rev = "fc1e5cc3f6d9d3001112385ee6256d694e959d2f";
+      hash = "sha256-sIDCZW4q9BQwy4AJjJ6r+mSkJ3usbnMmY9zkE4EVAy8=";
     };
   }
   {
-    name = "ini-0.1.0-YCQ9Ys0pAABixEvvQvhVXAdqRE3wrZk_wiL9TPNHhB8d";
-    path = fetchzip {
-      url = "https://github.com/ziglibs/ini/archive/918f16d0dcf893d0c1cdffe204faa08bb3584e04.tar.gz";
-      hash = "sha256-4o4tFV05IV/uSQWDtwqaeStY46ORmze//2IlBQ5MhnY=";
+    name = "ini-0.1.0-YCQ9YiwsAACghqF8LZyjAF2H_NnL6n29QLuCe0fsmPTo";
+    path = fetchgit {
+      url = "https://github.com/AshAmetrine/ziglibs-ini";
+      branchName = "zig-0.16.0";
+      rev = "3b733e10adc6c4c48050709b97a22258bc2e6156";
+      hash = "sha256-t+6zFMwpPgMrUygBcQCM0s10zK320D46xAgr2FSw3tU=";
     };
   }
   {
@@ -26,11 +29,11 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "zigini-0.4.0-BSkB7eJUAAD0Nt14fV482O8qNxsW8h_6BCTUIulluojv";
+    name = "zigini-0.5.0-BSkB7e9WAACfyCBABNZiWL3gFMw18GKn3qBcPs8L1Ec1";
     path = fetchgit {
-      url = "https://github.com/ashametrine/zigini";
-      rev = "fe98c40f646aada9e68fcc955180929628cad3f6";
-      hash = "sha256-PGu5//rxAYvbz8DUjyix9WeJxAQmDtwlSiifbCtqhh8=";
+      url = "https://github.com/AshAmetrine/zigini";
+      rev = "a665d081dda42664a96da2840ea09c5ccf9d0692";
+      hash = "sha256-8zwniFOQFTrFNOrfudhtoCXQBTBKSmc3XF1bNSb3Av8=";
     };
   }
 ]

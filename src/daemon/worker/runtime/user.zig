@@ -13,8 +13,8 @@ pub fn dropPrivileges(user_info: UserInfo) !void {
     if (initgroups(user_info.username, user_info.gid) != 0) {
         return std.posix.unexpectedErrno(std.posix.errno(-1));
     }
-    try std.posix.setgid(user_info.gid);
-    try std.posix.setuid(user_info.uid);
+    if (std.c.setgid(user_info.gid) != 0) return std.posix.unexpectedErrno(std.posix.errno(-1));
+    if (std.c.setuid(user_info.uid) != 0) return std.posix.unexpectedErrno(std.posix.errno(-1));
 }
 
 pub fn ensureOwnedDirAt(

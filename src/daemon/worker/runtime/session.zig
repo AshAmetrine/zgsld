@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const posix = @import("posix");
 const tty = @import("tty.zig");
 const env_mod = @import("env.zig");
 const build_options = @import("build_options");
@@ -20,16 +21,20 @@ const X11Setup = struct {
 
 pub fn start(
     allocator: std.mem.Allocator,
+    io: std.Io,
+    host_env_map: *const std.process.Environ.Map,
     user: [:0]const u8,
     info: Ipc.SessionInfo,
     pam: *Pam(PamCtx),
-    session_envmap: *std.process.EnvMap,
+    session_envmap: *std.process.Environ.Map,
     vt: Vt,
 ) !Session {
-    try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, vt);
-    try env_mod.applyTermEnv(session_envmap);
+    try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, io, host_env_map, vt);
+    try env_mod.applyTermEnv(session_envmap, host_env_map);
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
+        .io = io,
+        .host_env_map = host_env_map,
         .session_info = info,
         .envmap = session_envmap,
         .user_info = user_info,
@@ -48,6 +53,7 @@ pub const Session = struct {
         launcher_pid: std.posix.pid_t,
         server_pid: std.posix.pid_t,
 
+        io: std.Io,
         xauth_path: [:0]const u8,
         allocator: std.mem.Allocator,
 
@@ -58,12 +64,12 @@ pub const Session = struct {
 
             if (self.server_pid == self.launcher_pid) {
                 // X server is not detached
-                _ = std.posix.waitpid(self.server_pid, 0);
+                _ = posix.waitpid(self.server_pid, 0) catch {};
             } else if (self.launcher_pid > 0) {
-                _ = std.posix.waitpid(self.launcher_pid, std.posix.W.NOHANG);
+                _ = posix.waitpid(self.launcher_pid, std.posix.W.NOHANG) catch {};
             }
 
-            std.fs.deleteFileAbsolute(self.xauth_path) catch {};
+            std.Io.Dir.deleteFileAbsolute(self.io, self.xauth_path) catch {};
             self.allocator.free(self.xauth_path);
         }
     };
@@ -75,8 +81,10 @@ pub const Session = struct {
     }
 
     const SpawnOpts = struct {
+        io: std.Io,
+        host_env_map: *const std.process.Environ.Map,
         session_info: Ipc.SessionInfo,
-        envmap: *std.process.EnvMap,
+        envmap: *std.process.Environ.Map,
         user_info: UserInfo,
         vt: Vt,
     };
@@ -88,7 +96,7 @@ pub const Session = struct {
 
         var x11_setup: ?X11Setup = null;
         errdefer if (x11_setup) |setup| {
-            std.fs.deleteFileAbsolute(setup.xauth_path) catch {};
+            std.Io.Dir.deleteFileAbsolute(opts.io, setup.xauth_path) catch {};
             allocator.free(setup.xauth_path);
         };
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
@@ -100,7 +108,7 @@ pub const Session = struct {
 
             var xauth_buf: [std.fs.max_path_bytes]u8 = undefined;
             const runtime_dir = opts.envmap.get("XDG_RUNTIME_DIR");
-            const xauth_path = try x11.xauth.createXauthEntry(&xauth_buf, display_env[1..], opts.user_info.uid, opts.user_info.gid, runtime_dir);
+            const xauth_path = try x11.xauth.createXauthEntry(opts.io, &xauth_buf, display_env[1..], opts.user_info.uid, opts.user_info.gid, runtime_dir);
             const xauth_path_z = try allocator.dupeZ(u8, xauth_path);
             try opts.envmap.put("XAUTHORITY", xauth_path_z);
 
@@ -112,36 +120,40 @@ pub const Session = struct {
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
-        const session_environ = try std.process.createNullDelimitedEnvMap(arena.allocator(), opts.envmap);
+        const session_environ = try opts.envmap.createPosixBlock(arena.allocator(), .{});
 
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
             const setup = x11_setup orelse return error.X11SetupMissing;
-            const x_cmd = std.posix.getenv("ZGSLD_X11_CMD") orelse "/bin/X";
+            const x_cmd = opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X";
             const launcher_pid = try x11.startXServer(allocator, .{
+                .io = opts.io,
+                .env_map = opts.host_env_map,
                 .x_cmd = x_cmd,
                 .xauth_path = setup.xauth_path,
                 .display = setup.display,
                 .vt = opts.vt,
                 .user = opts.user_info,
-                .environ = session_environ,
+                .environ = session_environ.slice,
             });
 
             errdefer {
                 if (x11.readXServerPid(setup.display)) |pid| {
                     std.posix.kill(pid, std.posix.SIG.TERM) catch {};
                     if (pid == launcher_pid) {
-                        _ = std.posix.waitpid(pid, 0);
+                        _ = posix.waitpid(pid, 0) catch {};
                     }
                 }
                 if (launcher_pid > 0) {
                     std.posix.kill(launcher_pid, std.posix.SIG.TERM) catch {};
-                    _ = std.posix.waitpid(launcher_pid, std.posix.W.NOHANG);
+                    _ = posix.waitpid(launcher_pid, std.posix.W.NOHANG) catch {};
                 }
             }
 
             const xserver_pid = try x11.waitForXServer(setup.display, launcher_pid, 5000);
 
             const client_pid = try runSessionCommand(allocator, .{
+                .io = opts.io,
+                .env_map = opts.host_env_map,
                 .cmd = opts.session_info.command,
                 .environ = session_environ,
                 .user_info = opts.user_info,
@@ -154,6 +166,7 @@ pub const Session = struct {
                 .x11 = .{
                     .launcher_pid = launcher_pid,
                     .server_pid = xserver_pid,
+                    .io = opts.io,
                     .xauth_path = setup.xauth_path,
                     .allocator = allocator,
                 },
@@ -161,8 +174,10 @@ pub const Session = struct {
         }
 
         const session_pid = try runSessionCommand(allocator, .{
+            .io = opts.io,
+            .env_map = opts.host_env_map,
             .cmd = opts.session_info.command,
-            .environ = session_environ,
+            .environ = session_environ.slice,
             .user_info = opts.user_info,
             .home_dir = opts.envmap.get("HOME"),
             .vt = opts.vt,
@@ -171,6 +186,8 @@ pub const Session = struct {
     }
 
     const SessionCommandOpts = struct {
+        io: std.Io,
+        env_map: *const std.process.Environ.Map,
         cmd: Ipc.SessionCommand,
         user_info: UserInfo,
         home_dir: ?[]const u8,
@@ -188,30 +205,36 @@ pub const Session = struct {
 
         const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
 
-        return try startCommandSession(opts.user_info, opts.home_dir, &wrapper, opts.environ, opts.vt);
+        return try startCommandSession(opts.io, opts.env_map, opts.user_info, opts.home_dir, &wrapper, opts.environ, opts.vt);
     }
 };
 
 fn startCommandSession(
+    io: std.Io,
+    env_map: *const std.process.Environ.Map,
     user_info: UserInfo,
     home_dir: ?[]const u8,
     argv: [:null]const ?[*:0]const u8,
     session_environ: [:null]const ?[*:0]const u8,
     vt: Vt,
 ) !std.posix.pid_t {
-    const session_pid = try std.posix.fork();
+    const session_pid = blk: {
+        const child_pid = std.c.fork();
+        if (child_pid < 0) return std.posix.unexpectedErrno(std.c.errno(child_pid));
+        break :blk child_pid;
+    };
     if (session_pid == 0) {
         {
-            vt.activate() catch |err| {
+            vt.activate(io) catch |err| {
                 log.err("Failed to activate session tty: {s}", .{@errorName(err)});
                 std.process.exit(1);
             };
 
-            var tty_file = vt.openDevice(.read_write) catch |err| {
+            var tty_file = vt.openDevice(io, env_map, .read_write) catch |err| {
                 log.err("Failed to open session tty device: {s}", .{@errorName(err)});
                 std.process.exit(1);
             };
-            defer if (tty_file.handle > 2) tty_file.close();
+            defer if (tty_file.handle > 2) tty_file.close(io);
 
             tty.redirectStdioToTty(tty_file.handle) catch |err| {
                 log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
@@ -221,13 +244,15 @@ fn startCommandSession(
 
         utils.dropPrivileges(user_info) catch std.process.exit(1);
         if (home_dir) |dir| {
-            std.posix.chdir(dir) catch std.process.exit(1);
+            var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const dir_z = std.fmt.bufPrintZ(&dir_buf, "{s}", .{dir}) catch std.process.exit(1);
+            if (std.c.chdir(dir_z) != 0) std.process.exit(1);
         } else {
-            std.posix.chdir("/") catch std.process.exit(1);
+            if (std.c.chdir("/") != 0) std.process.exit(1);
         }
 
         const cmd_path = argv[0] orelse std.process.exit(1);
-        std.posix.execvpeZ(cmd_path, argv, session_environ) catch {};
+        _ = std.c.execve(cmd_path, argv.ptr, session_environ.ptr);
         std.process.exit(1);
     }
 

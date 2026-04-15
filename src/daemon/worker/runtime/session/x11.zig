@@ -1,4 +1,5 @@
 const std = @import("std");
+const posix = @import("posix");
 const utils = @import("../user.zig");
 const UserInfo = utils.UserInfo;
 const Vt = @import("vt").Vt;
@@ -9,7 +10,9 @@ pub const xauth = @import("xauth.zig");
 const log = std.log.scoped(.zgsld_worker);
 
 const XServerOpts = struct {
-    x_cmd: [:0]const u8,
+    io: std.Io,
+    env_map: *const std.process.Environ.Map,
+    x_cmd: []const u8,
     xauth_path: [:0]const u8,
     display: u8,
     vt: Vt,
@@ -22,7 +25,7 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
     const display_name = try std.fmt.bufPrint(&display_buf, ":{d}", .{opts.display});
 
     var vt_suffix_buf: [8]u8 = undefined;
-    const vt_suffix: []const u8 = if (opts.vt.ttyNumber()) |vt_num|
+    const vt_suffix: []const u8 = if (opts.vt.ttyNumber(opts.io, opts.env_map)) |vt_num|
         try std.fmt.bufPrint(&vt_suffix_buf, " vt{d}", .{vt_num})
     else
         "";
@@ -42,14 +45,18 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
         null,
     };
 
-    const pid = try std.posix.fork();
+    const pid = blk: {
+        const child_pid = std.c.fork();
+        if (child_pid < 0) return std.posix.unexpectedErrno(std.c.errno(child_pid));
+        break :blk child_pid;
+    };
     if (pid == 0) {
         {
-            var tty_file = opts.vt.openDevice(.read_write) catch |err| {
+            var tty_file = opts.vt.openDevice(opts.io, opts.env_map, .read_write) catch |err| {
                 log.err("Failed to open X server tty device: {s}", .{@errorName(err)});
                 std.process.exit(1);
             };
-            defer if (tty_file.handle > 2) tty_file.close();
+            defer if (tty_file.handle > 2) tty_file.close(opts.io);
 
             tty.redirectStdinToTty(tty_file.handle) catch |err| {
                 log.err("Failed to redirect X server stdin to tty: {s}", .{@errorName(err)});
@@ -61,7 +68,7 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
             utils.dropPrivileges(u) catch std.process.exit(1);
         }
 
-        std.posix.execvpeZ("/bin/sh", &argv, opts.environ) catch {};
+        _ = std.c.execve("/bin/sh", &argv, opts.environ.ptr);
         std.process.exit(1);
     }
 
@@ -125,7 +132,7 @@ pub fn waitForXServer(
 
         if (!launcher_exited) {
             // The launcher may exit early if the X server daemonizes.
-            const wait_res = std.posix.waitpid(launcher_pid, std.posix.W.NOHANG);
+            const wait_res = try posix.waitpid(launcher_pid, std.posix.W.NOHANG);
             if (wait_res.pid == launcher_pid) {
                 launcher_exited = true;
             }

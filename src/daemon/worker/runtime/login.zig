@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const posix = @import("posix");
 const pam_mod = @import("pam");
 const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
@@ -20,26 +21,28 @@ const SessionEnvKey = enum {
 
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
+    env_map: *const std.process.Environ.Map,
     service_name: []const u8,
     ipc_conn: *Ipc.Connection,
     vt: Vt,
 };
 
 const SessionSetup = struct {
-    env: std.process.EnvMap,
+    env: std.process.Environ.Map,
     info: Ipc.SessionInfo,
 };
 
 pub fn run(opts: RunOpts) !void {
     var ipc_closed = false;
-    defer if (!ipc_closed) opts.ipc_conn.deinit();
+    defer if (!ipc_closed) opts.ipc_conn.deinit(opts.io);
 
     var saw_auth = false;
     var event_buf: [Ipc.event_buf_size]u8 = undefined;
     var rbuf: [Ipc.event_buf_size]u8 = undefined;
     var wbuf: [Ipc.event_buf_size]u8 = undefined;
-    var reader_impl = opts.ipc_conn.reader(&rbuf);
-    var writer_impl = opts.ipc_conn.writer(&wbuf);
+    var reader_impl = opts.ipc_conn.reader(opts.io, &rbuf);
+    var writer_impl = opts.ipc_conn.writer(opts.io, &wbuf);
     const ipc_reader = &reader_impl.interface;
     const ipc_writer = &writer_impl.interface;
 
@@ -80,7 +83,7 @@ pub fn run(opts: RunOpts) !void {
                 defer pam.deinit();
 
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                if (try opts.vt.resolveTtyDevicePath(&tty_path_buf)) |tty_path| {
+                if (try opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf)) |tty_path| {
                     try pam.setItem(.{ .tty = tty_path });
                 }
 
@@ -88,9 +91,9 @@ pub fn run(opts: RunOpts) !void {
 
                 var session_setup = try getSession(opts.allocator, opts.ipc_conn, ipc_reader, &event_buf) orelse continue;
                 if (signals.shutdownRequested()) return;
-                opts.ipc_conn.deinit();
+                opts.ipc_conn.deinit(opts.io);
                 ipc_closed = true;
-                try runSession(opts.allocator, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
+                try runSession(opts.allocator, opts.io, opts.env_map, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
                 return;
             },
             else => unreachable,
@@ -154,7 +157,7 @@ fn getSession(
     ipc_reader: *std.Io.Reader,
     event_buf: *[Ipc.event_buf_size]u8,
 ) !?SessionSetup {
-    var session_envmap = std.process.EnvMap.init(allocator);
+    var session_envmap = std.process.Environ.Map.init(allocator);
     errdefer session_envmap.deinit();
 
     while (true) {
@@ -188,22 +191,24 @@ fn getSession(
 
 fn runSession(
     allocator: std.mem.Allocator,
+    io: std.Io,
+    env_map: *const std.process.Environ.Map,
     user_z: [:0]const u8,
     info: Ipc.SessionInfo,
     pam: *Pam(PamCtx),
-    session_envmap: *std.process.EnvMap,
+    session_envmap: *std.process.Environ.Map,
     vt: Vt,
 ) !void {
     log.debug("Starting session...", .{});
-    try vt.activate();
+    try vt.activate(io);
 
-    var tty_file = try vt.openDevice(.read_write);
-    defer if (tty_file.handle > 2) tty_file.close();
+    var tty_file = try vt.openDevice(io, env_map, .read_write);
+    defer if (tty_file.handle > 2) tty_file.close(io);
     try vt.establishSessionControllingTty(tty_file.handle);
 
     var session = blk: {
         defer session_envmap.deinit();
-        break :blk try session_mod.start(allocator, user_z, info, pam, session_envmap, vt);
+        break :blk try session_mod.start(allocator, io, env_map, user_z, info, pam, session_envmap, vt);
     };
     defer session.deinit();
 
@@ -214,5 +219,5 @@ fn runSession(
     if (signals.shutdownRequested()) {
         signals.forwardShutdownSignal(signals.shutdownSignal());
     }
-    _ = std.posix.waitpid(session.pid, 0);
+    _ = try posix.waitpid(session.pid, 0);
 }

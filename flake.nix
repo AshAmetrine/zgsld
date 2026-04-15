@@ -3,13 +3,18 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    zigOverlay.url = "github:mitchellh/zig-overlay";
+    zigOverlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
-    { self, nixpkgs, ... }:
+    { self, nixpkgs, zigOverlay, ... }:
     let
       inherit (nixpkgs) lib;
       forAllSystems = lib.genAttrs lib.systems.flakeExposed;
+      zigPkgOverlay = final: _prev: {
+        zig = zigOverlay.packages.${final.stdenv.hostPlatform.system}."0.16.0";
+      };
       zgsldOverlay = final: _prev: {
         zgsld = final.callPackage ./nix/package.nix { };
       };
@@ -26,7 +31,10 @@
           }:
           {
             imports = [ ./nix/module.nix ];
-            nixpkgs.overlays = [ self.overlays.default ];
+            nixpkgs.overlays = [
+              zigPkgOverlay
+              self.overlays.default
+            ];
             #services.zgsld.package = lib.mkDefault self.packages.${pkgs.system}.default;
           };
         default = self.nixosModules.zgsld;
@@ -37,7 +45,10 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ zgsldOverlay ];
+            overlays = [
+              zigPkgOverlay
+              zgsldOverlay
+            ];
           };
         in
         {
@@ -58,7 +69,10 @@
       devShells = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ zigPkgOverlay ];
+          };
         in
         {
           default = pkgs.mkShell {

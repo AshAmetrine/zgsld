@@ -5,34 +5,38 @@ pub const types = @import("preview/types.zig");
 const Options = types.Options;
 
 pub const Runtime = struct {
+    io: std.Io,
     ipc_conn: Ipc.Connection,
     thread: ?std.Thread,
     ctx: *Runtime.ServerCtx,
 
     pub const ServerCtx = struct {
+        io: std.Io,
         conn: Ipc.Connection,
         opts: Options,
         err: ?anyerror,
     };
 
-    pub fn init(ctx: *Runtime.ServerCtx, opts: Options) !Runtime {
+    pub fn init(io: std.Io, ctx: *Runtime.ServerCtx, opts: Options) !Runtime {
         const fds = try SocketPair.init(false);
-        errdefer std.posix.close(fds.parent);
-        errdefer std.posix.close(fds.child);
+        errdefer _ = std.c.close(fds.parent);
+        errdefer _ = std.c.close(fds.child);
 
         ctx.* = .{
+            .io = io,
             .conn = Ipc.Connection.initFromFd(fds.parent),
             .opts = opts,
             .err = null,
         };
-        errdefer ctx.conn.deinit();
+        errdefer ctx.conn.deinit(io);
 
         var ipc_conn = Ipc.Connection.initFromFd(fds.child);
-        errdefer ipc_conn.deinit();
+        errdefer ipc_conn.deinit(io);
 
         const thread = try std.Thread.spawn(.{}, ipcThreadMain, .{ctx});
 
         return .{
+            .io = io,
             .ipc_conn = ipc_conn,
             .thread = thread,
             .ctx = ctx,
@@ -45,7 +49,7 @@ pub const Runtime = struct {
         const thread = self.thread.?;
         self.thread = null;
 
-        self.ipc_conn.deinit();
+        self.ipc_conn.deinit(self.io);
         thread.join();
 
         if (self.ctx.err) |err| return err;
@@ -57,7 +61,7 @@ pub const Runtime = struct {
 };
 
 fn ipcThreadMain(ctx: *Runtime.ServerCtx) void {
-    defer ctx.conn.deinit();
+    defer ctx.conn.deinit(ctx.io);
     runMockIpc(ctx) catch |err| {
         ctx.err = err;
     };
@@ -90,8 +94,8 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
     var wbuf: [Ipc.event_buf_size]u8 = undefined;
     var authenticated = false;
 
-    var reader = ctx.conn.reader(&rbuf);
-    var writer = ctx.conn.writer(&wbuf);
+    var reader = ctx.conn.reader(ctx.io, &rbuf);
+    var writer = ctx.conn.writer(ctx.io, &wbuf);
     const io_reader = &reader.interface;
     const io_writer = &writer.interface;
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
+const posix = @import("posix");
 const SocketPair = @import("../SocketPair.zig");
 const worker = @import("worker.zig");
 const log = std.log.scoped(.zgsld);
@@ -11,6 +12,7 @@ var session_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
 var shutdown_requested = std.atomic.Value(u8).init(0);
 
 const ForwardIpcCtx = struct {
+    io: std.Io,
     src: *Ipc.Connection,
     dst: *Ipc.Connection,
     err: ?anyerror = null,
@@ -25,6 +27,8 @@ const SpawnedWorkers = struct {
 
 pub const SessionManagerRunOpts = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
+    env_map: *const std.process.Environ.Map,
     self_exe_path: [:0]const u8,
     config: Config,
 };
@@ -42,22 +46,23 @@ pub fn run(opts: SessionManagerRunOpts) !void {
         return error.GreeterUserNotFound;
     }
 
-    try opts.config.vt.normalize();
+    try opts.config.vt.normalize(opts.io, opts.env_map);
 
     const run_autologin = try shouldRunAutologin(opts.config);
     if (run_autologin) {
-        defer opts.config.vt.normalize() catch {};
+        defer opts.config.vt.normalize(opts.io, opts.env_map) catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
         try runAutologin(opts);
         if (shutdown_requested.load(.seq_cst) != 0) return;
     }
 
     while (true) {
-        defer opts.config.vt.normalize() catch {};
+        defer opts.config.vt.normalize(opts.io, opts.env_map) catch {};
         if (shutdown_requested.load(.seq_cst) != 0) return;
 
         const spawned = try spawnWorkers(.{
             .allocator = opts.allocator,
+            .env_map = opts.env_map,
             .worker_path = opts.self_exe_path,
             .config = opts.config,
         });
@@ -72,7 +77,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             std.posix.kill(spawned.session_proc.pid, std.posix.SIG.TERM) catch {};
         }
 
-        try forwardIpc(spawned.greeter_fd, spawned.session_fd, spawned.greeter_proc);
+        try forwardIpc(opts.io, spawned.greeter_fd, spawned.session_fd, spawned.greeter_proc);
         try waitWorkerAndClearPid(&greeter_worker_pid, spawned.greeter_proc);
         try waitWorkerAndClearPid(&session_worker_pid, spawned.session_proc);
     }
@@ -80,6 +85,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
 const SpawnWorkersOpts = struct {
     allocator: std.mem.Allocator,
+    env_map: *const std.process.Environ.Map,
     worker_path: [:0]const u8,
     config: Config,
 };
@@ -87,12 +93,13 @@ const SpawnWorkersOpts = struct {
 fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     log.debug("Spawning Session Worker...", .{});
     const session_socks = try SocketPair.init(true);
-    errdefer std.posix.close(session_socks.parent);
+    errdefer _ = std.c.close(session_socks.parent);
 
     const session_proc = blk: {
-        defer std.posix.close(session_socks.child);
+        defer _ = std.c.close(session_socks.child);
         break :blk try worker.WorkerProcess.spawn(.{
             .allocator = opts.allocator,
+            .env_map = opts.env_map,
             .worker_path = opts.worker_path,
             .config = opts.config,
             .session_class = .user,
@@ -101,17 +108,18 @@ fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     };
     errdefer {
         std.posix.kill(session_proc.pid, std.posix.SIG.TERM) catch {};
-        _ = std.posix.waitpid(session_proc.pid, 0);
+        _ = posix.waitpid(session_proc.pid, 0) catch {};
     }
 
     log.debug("Spawning Greeter worker...", .{});
     const greeter_socks = try SocketPair.init(true);
-    errdefer std.posix.close(greeter_socks.parent);
+    errdefer _ = std.c.close(greeter_socks.parent);
 
     const greeter_proc = blk: {
-        defer std.posix.close(greeter_socks.child);
+        defer _ = std.c.close(greeter_socks.child);
         break :blk try worker.WorkerProcess.spawn(.{
             .allocator = opts.allocator,
+            .env_map = opts.env_map,
             .worker_path = opts.worker_path,
             .config = opts.config,
             .session_class = .greeter,
@@ -131,41 +139,42 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
     const autologin = opts.config.autologin;
 
     if (autologin.timeout_seconds != 0) {
-        try opts.config.vt.activate();
+        try opts.config.vt.activate(opts.io);
         var remaining = autologin.timeout_seconds;
-        var watcher = opts.config.vt.watchInput() catch |err| {
+        var watcher = opts.config.vt.watchInput(opts.io, opts.env_map) catch |err| {
             if (shutdown_requested.load(.seq_cst) != 0) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;
         };
-        defer watcher.deinit();
+        defer watcher.deinit(opts.io);
 
         while (remaining > 0) : (remaining -= 1) {
-            writeAutologinCountdown(&watcher.file, remaining);
+            writeAutologinCountdown(opts.io, &watcher.file, remaining);
 
             const interrupted = watcher.waitForInput(std.time.ms_per_s) catch |err| {
-                clearAutologinCountdown(&watcher.file);
+                clearAutologinCountdown(opts.io, &watcher.file);
                 if (shutdown_requested.load(.seq_cst) != 0) return;
                 log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
                 return;
             };
             if (shutdown_requested.load(.seq_cst) != 0) {
-                clearAutologinCountdown(&watcher.file);
+                clearAutologinCountdown(opts.io, &watcher.file);
                 return;
             }
             if (interrupted) {
-                clearAutologinCountdown(&watcher.file);
+                clearAutologinCountdown(opts.io, &watcher.file);
                 log.debug("Autologin interrupted; starting greeter", .{});
                 return;
             }
         }
-        clearAutologinCountdown(&watcher.file);
+        clearAutologinCountdown(opts.io, &watcher.file);
     }
 
     if (shutdown_requested.load(.seq_cst) != 0) return;
 
     const autologin_proc = try spawnAutologinWorker(.{
         .allocator = opts.allocator,
+        .env_map = opts.env_map,
         .worker_path = opts.self_exe_path,
         .config = opts.config,
     });
@@ -185,6 +194,7 @@ fn runAutologin(opts: SessionManagerRunOpts) !void {
 
 const SpawnAutologinWorkerOpts = struct {
     allocator: std.mem.Allocator,
+    env_map: *const std.process.Environ.Map,
     worker_path: [:0]const u8,
     config: Config,
 };
@@ -193,6 +203,7 @@ fn spawnAutologinWorker(opts: SpawnAutologinWorkerOpts) !worker.WorkerProcess {
     log.debug("Spawning Autologin worker...", .{});
     return worker.WorkerProcess.spawn(.{
         .allocator = opts.allocator,
+        .env_map = opts.env_map,
         .worker_path = opts.worker_path,
         .config = opts.config,
         .session_class = .autologin,
@@ -200,31 +211,33 @@ fn spawnAutologinWorker(opts: SpawnAutologinWorkerOpts) !worker.WorkerProcess {
     });
 }
 
-fn writeAutologinCountdown(tty_file: *std.fs.File, remaining_seconds: u64) void {
+fn writeAutologinCountdown(io: std.Io, tty_file: *std.Io.File, remaining_seconds: u64) void {
     var buf: [128]u8 = undefined;
     const msg = std.fmt.bufPrint(
         &buf,
         "\rLaunching session in {d}... (Press any key to interrupt)\x1b[K",
         .{remaining_seconds},
     ) catch return;
-    _ = tty_file.write(msg) catch return;
+    tty_file.writeStreamingAll(io, msg) catch return;
 }
 
-fn clearAutologinCountdown(tty_file: *std.fs.File) void {
-    _ = tty_file.write("\r\x1b[K") catch return;
+fn clearAutologinCountdown(io: std.Io, tty_file: *std.Io.File) void {
+    tty_file.writeStreamingAll(io, "\r\x1b[K") catch return;
 }
 
 fn forwardIpc(
+    io: std.Io,
     greeter_fd: std.posix.fd_t,
     worker_fd: std.posix.fd_t,
     greeter_worker_proc: worker.WorkerProcess,
 ) !void {
     var greeter_conn = Ipc.Connection.initFromFd(greeter_fd);
-    defer greeter_conn.deinit();
+    defer greeter_conn.deinit(io);
     var worker_conn = Ipc.Connection.initFromFd(worker_fd);
-    defer worker_conn.deinit();
+    defer worker_conn.deinit(io);
 
     var worker_to_greeter = ForwardIpcCtx{
+        .io = io,
         .src = &worker_conn,
         .dst = &greeter_conn,
     };
@@ -236,8 +249,8 @@ fn forwardIpc(
     var rbuf: [Ipc.event_buf_size]u8 = undefined;
     var wbuf: [Ipc.event_buf_size]u8 = undefined;
 
-    var reader = greeter_conn.reader(&rbuf);
-    var writer = worker_conn.writer(&wbuf);
+    var reader = greeter_conn.reader(io, &rbuf);
+    var writer = worker_conn.writer(io, &wbuf);
     const io_reader = &reader.interface;
     const io_writer = &writer.interface;
 
@@ -258,7 +271,7 @@ fn forwardIpc(
         try io_writer.flush();
     }
 
-    std.posix.shutdown(worker_conn.file.handle, .both) catch {};
+    _ = std.c.shutdown(worker_conn.file.handle, 2);
     if (worker_to_greeter.err) |err| return err;
 }
 
@@ -278,7 +291,7 @@ fn terminateWorkerAndClearPid(pid_slot: *std.atomic.Value(std.posix.pid_t)) void
     const pid = pid_slot.load(.seq_cst);
     if (pid <= 0) return;
     std.posix.kill(pid, std.posix.SIG.TERM) catch {};
-    _ = std.posix.waitpid(pid, 0);
+    _ = posix.waitpid(pid, 0) catch {};
     pid_slot.store(0, .seq_cst);
 }
 
@@ -287,8 +300,8 @@ fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
     var rbuf: [Ipc.event_buf_size]u8 = undefined;
     var wbuf: [Ipc.event_buf_size]u8 = undefined;
 
-    var reader = ctx.src.reader(&rbuf);
-    var writer = ctx.dst.writer(&wbuf);
+    var reader = ctx.src.reader(ctx.io, &rbuf);
+    var writer = ctx.dst.writer(ctx.io, &wbuf);
     const io_reader = &reader.interface;
     const io_writer = &writer.interface;
 
@@ -310,8 +323,8 @@ fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
         };
     }
 
-    std.posix.shutdown(ctx.src.file.handle, .both) catch {};
-    std.posix.shutdown(ctx.dst.file.handle, .both) catch {};
+    _ = std.c.shutdown(ctx.src.file.handle, 2);
+    _ = std.c.shutdown(ctx.dst.file.handle, 2);
 }
 
 fn installSignalHandlers() void {
@@ -321,7 +334,7 @@ fn installSignalHandlers() void {
         .flags = 0,
     };
 
-    const forward_signals = [_]u8{
+    const forward_signals = [_]std.posix.SIG{
         std.posix.SIG.TERM,
         std.posix.SIG.HUP,
         std.posix.SIG.QUIT,
@@ -332,16 +345,15 @@ fn installSignalHandlers() void {
     }
 }
 
-fn forwardSignalToWorker(sig: i32) callconv(.c) void {
+fn forwardSignalToWorker(sig: std.posix.SIG) callconv(.c) void {
     const gwpid = greeter_worker_pid.load(.seq_cst);
     const swpid = session_worker_pid.load(.seq_cst);
-    const sig_u8: u8 = @intCast(sig);
     shutdown_requested.store(1, .seq_cst);
     if (gwpid > 0) {
-        std.posix.kill(gwpid, sig_u8) catch {};
+        std.posix.kill(gwpid, sig) catch {};
     }
     if (swpid > 0) {
-        std.posix.kill(swpid, sig_u8) catch {};
+        std.posix.kill(swpid, sig) catch {};
     }
 }
 
