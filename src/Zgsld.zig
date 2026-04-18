@@ -100,7 +100,7 @@ pub fn run(self: Self) !void {
 }
 
 /// Runs the greeter against a mock IPC daemon.
-pub fn runPreview(self: Self, opts: preview_mod.types.Options) !void {
+pub fn runPreview(self: Self, opts: preview_mod.api.Options) !void {
     var ctx: preview_mod.Runtime.ServerCtx = undefined;
     var runtime = try preview_mod.Runtime.init(self.process.io, &ctx, opts);
     defer runtime.deinit();

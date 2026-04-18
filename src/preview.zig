@@ -1,8 +1,8 @@
 const std = @import("std");
 const Ipc = @import("Ipc");
 const SocketPair = @import("SocketPair.zig");
-pub const types = @import("preview/types.zig");
-const Options = types.Options;
+pub const api = @import("preview/api.zig");
+const Options = api.Options;
 
 pub const Runtime = struct {
     io: std.Io,
@@ -182,7 +182,7 @@ fn runAuthSequence(
 
 fn runSteps(
     ctx: *Runtime.ServerCtx,
-    steps: []const types.Step,
+    steps: []const api.Step,
     io_reader: *std.Io.Reader,
     io_writer: *std.Io.Writer,
     event_buf: []u8,
