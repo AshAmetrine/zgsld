@@ -94,7 +94,7 @@ const SpawnWorkersOpts = struct {
 
 fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     log.debug("Spawning Session Worker...", .{});
-    const session_socks = try SocketPair.init(opts.io, true);
+    const session_socks = try SocketPair.init(opts.io);
     errdefer session_socks.parent.close(opts.io);
 
     const session_proc = blk: {
@@ -114,7 +114,7 @@ fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     }
 
     log.debug("Spawning Greeter worker...", .{});
-    const greeter_socks = try SocketPair.init(opts.io, true);
+    const greeter_socks = try SocketPair.init(opts.io);
     errdefer greeter_socks.parent.close(opts.io);
 
     const greeter_proc = blk: {

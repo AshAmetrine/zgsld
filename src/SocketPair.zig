@@ -1,14 +1,14 @@
 const std = @import("std");
-const fd = @import("fd.zig");
 
 const SocketPair = @This();
 
 parent: std.Io.File,
 child: std.Io.File,
 
-pub fn init(io: std.Io, parent_cloexec: bool) !SocketPair {
+pub fn init(io: std.Io) !SocketPair {
     var fds: [2]std.posix.fd_t = undefined;
-    const rc = std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds);
+    const sock_type = std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC;
+    const rc = std.c.socketpair(std.posix.AF.UNIX, sock_type, 0, &fds);
     if (rc != 0) return std.posix.unexpectedErrno(std.posix.errno(rc));
 
     const parent: std.Io.File = .{
@@ -22,10 +22,6 @@ pub fn init(io: std.Io, parent_cloexec: bool) !SocketPair {
         .flags = .{ .nonblocking = false },
     };
     errdefer child.close(io);
-
-    if (parent_cloexec) {
-        try fd.setCloseOnExec(parent.handle);
-    }
 
     return .{
         .parent = parent,

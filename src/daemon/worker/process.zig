@@ -3,6 +3,7 @@ const Ipc = @import("Ipc");
 const posix = @import("posix");
 const build_options = @import("build_options");
 const Config = @import("../../Config.zig");
+const fd = @import("../../fd.zig");
 
 const log = std.log.scoped(.zgsld);
 
@@ -116,6 +117,11 @@ pub const WorkerProcess = struct {
             break :blk child_pid;
         };
         if (pid == 0) {
+            if (opts.ipc_fd) |ipc_fd| {
+                fd.clearCloseOnExec(ipc_fd) catch {
+                    std.process.exit(1);
+                };
+            }
             _ = std.c.execve(opts.worker_path, &argv, worker_environ.slice.ptr);
             log.err("Worker exec error\n", .{});
             std.process.exit(1);

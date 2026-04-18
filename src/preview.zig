@@ -18,7 +18,7 @@ pub const Runtime = struct {
     };
 
     pub fn init(io: std.Io, ctx: *Runtime.ServerCtx, opts: Options) !Runtime {
-        const fds = try SocketPair.init(io, false);
+        const fds = try SocketPair.init(io);
 
         ctx.* = .{
             .io = io,
