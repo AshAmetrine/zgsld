@@ -1,7 +1,7 @@
 const Ipc = @import("Ipc");
 
 pub const password_auth_steps = [_]Step{
-    .challenge("Password: ", .expect("123"), .{}),
+    .challenge("Password: ", .any, .{}),
 };
 
 pub const change_auth_token_steps = [_]Step{
@@ -24,7 +24,7 @@ pub const change_auth_token_steps = [_]Step{
 pub const Options = struct {
     authenticate_steps: []const Step = &password_auth_steps,
     post_auth_steps: []const Step = &.{},
-    expected_user: ?[]const u8 = "user",
+    expected_user: ?[]const u8 = null,
 };
 
 pub const ExpectedResponse = union(enum) {
