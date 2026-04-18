@@ -18,19 +18,17 @@ pub const Runtime = struct {
     };
 
     pub fn init(io: std.Io, ctx: *Runtime.ServerCtx, opts: Options) !Runtime {
-        const fds = try SocketPair.init(false);
-        errdefer _ = std.c.close(fds.parent);
-        errdefer _ = std.c.close(fds.child);
+        const fds = try SocketPair.init(io, false);
 
         ctx.* = .{
             .io = io,
-            .conn = Ipc.Connection.initFromFd(fds.parent),
+            .conn = Ipc.Connection.init(fds.parent),
             .opts = opts,
             .err = null,
         };
         errdefer ctx.conn.deinit(io);
 
-        var ipc_conn = Ipc.Connection.initFromFd(fds.child);
+        var ipc_conn = Ipc.Connection.init(fds.child);
         errdefer ipc_conn.deinit(io);
 
         const thread = try std.Thread.spawn(.{}, ipcThreadMain, .{ctx});

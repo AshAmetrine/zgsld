@@ -21,8 +21,8 @@ const ForwardIpcCtx = struct {
 const SpawnedWorkers = struct {
     session_proc: worker.WorkerProcess,
     greeter_proc: worker.WorkerProcess,
-    session_fd: std.posix.fd_t,
-    greeter_fd: std.posix.fd_t,
+    session_file: std.Io.File,
+    greeter_file: std.Io.File,
 };
 
 pub const SessionManagerRunOpts = struct {
@@ -62,6 +62,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
         const spawned = try spawnWorkers(.{
             .allocator = opts.allocator,
+            .io = opts.io,
             .env_map = opts.env_map,
             .worker_path = opts.self_exe_path,
             .config = opts.config,
@@ -77,7 +78,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             std.posix.kill(spawned.session_proc.pid, std.posix.SIG.TERM) catch {};
         }
 
-        try forwardIpc(opts.io, spawned.greeter_fd, spawned.session_fd, spawned.greeter_proc);
+        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, spawned.greeter_proc);
         try waitWorkerAndClearPid(&greeter_worker_pid, spawned.greeter_proc);
         try waitWorkerAndClearPid(&session_worker_pid, spawned.session_proc);
     }
@@ -85,6 +86,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
 const SpawnWorkersOpts = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     env_map: *const std.process.Environ.Map,
     worker_path: [:0]const u8,
     config: Config,
@@ -92,18 +94,18 @@ const SpawnWorkersOpts = struct {
 
 fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     log.debug("Spawning Session Worker...", .{});
-    const session_socks = try SocketPair.init(true);
-    errdefer _ = std.c.close(session_socks.parent);
+    const session_socks = try SocketPair.init(opts.io, true);
+    errdefer session_socks.parent.close(opts.io);
 
     const session_proc = blk: {
-        defer _ = std.c.close(session_socks.child);
+        defer session_socks.child.close(opts.io);
         break :blk try worker.WorkerProcess.spawn(.{
             .allocator = opts.allocator,
             .env_map = opts.env_map,
             .worker_path = opts.worker_path,
             .config = opts.config,
             .session_class = .user,
-            .ipc_fd = session_socks.child,
+            .ipc_fd = session_socks.child.handle,
         });
     };
     errdefer {
@@ -112,26 +114,26 @@ fn spawnWorkers(opts: SpawnWorkersOpts) !SpawnedWorkers {
     }
 
     log.debug("Spawning Greeter worker...", .{});
-    const greeter_socks = try SocketPair.init(true);
-    errdefer _ = std.c.close(greeter_socks.parent);
+    const greeter_socks = try SocketPair.init(opts.io, true);
+    errdefer greeter_socks.parent.close(opts.io);
 
     const greeter_proc = blk: {
-        defer _ = std.c.close(greeter_socks.child);
+        defer greeter_socks.child.close(opts.io);
         break :blk try worker.WorkerProcess.spawn(.{
             .allocator = opts.allocator,
             .env_map = opts.env_map,
             .worker_path = opts.worker_path,
             .config = opts.config,
             .session_class = .greeter,
-            .ipc_fd = greeter_socks.child,
+            .ipc_fd = greeter_socks.child.handle,
         });
     };
 
     return .{
         .session_proc = session_proc,
         .greeter_proc = greeter_proc,
-        .session_fd = session_socks.parent,
-        .greeter_fd = greeter_socks.parent,
+        .session_file = session_socks.parent,
+        .greeter_file = greeter_socks.parent,
     };
 }
 
@@ -227,13 +229,13 @@ fn clearAutologinCountdown(io: std.Io, tty_file: *std.Io.File) void {
 
 fn forwardIpc(
     io: std.Io,
-    greeter_fd: std.posix.fd_t,
-    worker_fd: std.posix.fd_t,
+    greeter_file: std.Io.File,
+    worker_file: std.Io.File,
     greeter_worker_proc: worker.WorkerProcess,
 ) !void {
-    var greeter_conn = Ipc.Connection.initFromFd(greeter_fd);
+    var greeter_conn = Ipc.Connection.init(greeter_file);
     defer greeter_conn.deinit(io);
-    var worker_conn = Ipc.Connection.initFromFd(worker_fd);
+    var worker_conn = Ipc.Connection.init(worker_file);
     defer worker_conn.deinit(io);
 
     var worker_to_greeter = ForwardIpcCtx{

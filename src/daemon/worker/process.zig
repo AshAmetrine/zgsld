@@ -74,7 +74,7 @@ pub const WorkerProcess = struct {
             .greeter => {
                 const greeter_cmd_str: []const u8 = if (opts.config.greeter.command) |cmd| blk: {
                     if (cmd.len == 0) return error.NullGreeterCmd;
-                    break :blk cmd; 
+                    break :blk cmd;
                 } else return error.NullGreeterCmd;
 
                 try worker_envmap.put(
