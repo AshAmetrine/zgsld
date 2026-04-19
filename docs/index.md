@@ -63,7 +63,7 @@ For NixOS, import the module and enable the service:
 
 #### Dependencies
 
-- [Zig 0.15.2](https://ziglang.org/)
+- [Zig 0.16.0](https://ziglang.org/)
 - libc
 - libpam
 

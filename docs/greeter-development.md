@@ -30,6 +30,8 @@ exe.root_module.addImport("zgsld", zgsld.module("zgsld"));
 - `standalone`
 When this is `true`, your greeter will not depend on the `zgsld` binary and will have all `zgsld` functionality built-in to the built executable.
 
+`standalone` defaults to `true`.
+
 - `x11`
 Whether standalone builds should support starting the X server. This is a no-op when `.standalone = false`.
 
@@ -48,9 +50,12 @@ For the full API reference, see the [generated Zig docs](../zig/).
 In your `main()` function, you will want to `init` the `Zgsld` struct and then call the `run` function:
 
 ```zig
-const app = Zgsld.init(allocator, &.{
-    .run = run,
-    .configure = configure,
+const app = Zgsld.init(.{
+    .process = .fromInit(init),
+    .vtable = &.{
+        .run = run,
+        .configure = configure,
+    },
 });
 ```
 
@@ -103,7 +108,7 @@ const zgsld = @import("zgsld");
 pub const std_options: std.Options = .{ .logFn = zgsld.logFn };
 ```
 
-Then in `main()`, you can call `zgsld.initZgsldLog()`. 
+Then in `main()`, you can call `zgsld.initZgsldLog(init.environ_map)`. 
 
 ZGSLD passes `ZGSLD_LOG` (ZGSLD's log file descriptor) through to the greeter, and `initZgsldLog` fetches this environment variable and stores it for usage by `zgsld.logFn`.
 
@@ -119,9 +124,13 @@ This also allows users to view configuration changes they make in the greeter's 
 This is a small snippet from a project which runs a preview based on build options.
 
 ```zig
-    const app = Zgsld.init(allocator, &.{
-        .run = run,
-        .configure = configure,
+pub fn main(init: std.process.Init) !void {
+    const app = Zgsld.init(.{
+        .process = .fromInit(init),
+        .vtable = &.{
+            .run = run,
+            .configure = configure,
+        },
     });
 
     if (build_options.preview) {
@@ -132,4 +141,5 @@ This is a small snippet from a project which runs a preview based on build optio
     } else {
         try app.run();
     }
+}
 ```
