@@ -10,6 +10,9 @@ pub const Vt = @import("vt").Vt;
 const X11Config = struct {
     /// X server command, optionally with args.
     command: []const u8 = build_options.x11_cmd,
+
+    /// VT used for X11 sessions. `null` follows the main `vt` setting.
+    vt: ?u8 = null,
 };
 
 const GreeterConfig = struct {

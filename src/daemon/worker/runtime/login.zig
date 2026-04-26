@@ -200,15 +200,16 @@ fn runSession(
     vt: Vt,
 ) !void {
     log.debug("Starting session...", .{});
-    try vt.activate(io);
+    const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
+    try session_vt.activate(io);
 
-    var tty_file = try vt.openDevice(io, env_map, .read_write);
+    var tty_file = try session_vt.openDevice(io, env_map, .read_write);
     defer if (tty_file.handle > 2) tty_file.close(io);
-    try vt.establishSessionControllingTty(tty_file.handle);
+    try session_vt.establishSessionControllingTty(tty_file.handle);
 
     var session = blk: {
         defer session_envmap.deinit();
-        break :blk try session_mod.start(allocator, io, env_map, user_z, info, pam, session_envmap, vt);
+        break :blk try session_mod.start(allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
     };
     defer session.deinit();
 

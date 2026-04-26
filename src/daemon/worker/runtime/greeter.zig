@@ -58,13 +58,19 @@ pub const Greeter = struct {
         io: std.Io,
         env_map: *const std.process.Environ.Map,
     ) !std.posix.pid_t {
-        try vt.activate(io);
+        const session_vt = try session_mod.resolveSessionVt(session_type, env_map, vt);
+        try session_vt.activate(io);
 
-        var tty_file = try vt.openDevice(io, env_map, .read_write);
+        var tty_file = try session_vt.openDevice(io, env_map, .read_write);
         defer if (tty_file.handle > 2) tty_file.close(io);
-        try vt.establishSessionControllingTty(tty_file.handle);
+        try session_vt.establishSessionControllingTty(tty_file.handle);
 
-        if (vt.ttyNumber(io, env_map)) |vt_num| {
+        var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        if (try session_vt.resolveTtyDevicePath(io, env_map, &tty_path_buf)) |tty_path| {
+            try self.pam.setItem(.{ .tty = tty_path });
+        }
+
+        if (session_vt.ttyNumber(io, env_map)) |vt_num| {
             var vt_buf: [3]u8 = undefined;
             const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
             try self.pam.putEnvAlloc("XDG_VTNR", vt_value);
@@ -112,7 +118,7 @@ pub const Greeter = struct {
             .session_info = session_info,
             .envmap = &envmap,
             .user_info = self.user_info,
-            .vt = vt,
+            .vt = session_vt,
         });
 
         return self.session.?.pid;

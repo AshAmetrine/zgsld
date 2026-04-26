@@ -14,6 +14,21 @@ const Vt = @import("vt").Vt;
 
 const log = std.log.scoped(.zgsld_worker);
 
+pub fn resolveSessionVt(
+    session_type: Ipc.SessionType,
+    host_env_map: *const std.process.Environ.Map,
+    fallback: Vt,
+) !Vt {
+    if (build_options.x11_support and session_type == .x11) {
+        if (host_env_map.get("ZGSLD_X11_VT")) |raw| {
+            const number = try std.fmt.parseInt(u8, raw, 10);
+            if (number == 0) return error.InvalidTty;
+            return .{ .number = number };
+        }
+    }
+    return fallback;
+}
+
 const X11Setup = struct {
     display: u8,
     xauth_path: [:0]const u8,
@@ -29,7 +44,8 @@ pub fn start(
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
 ) !Session {
-    try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, io, host_env_map, vt);
+    const session_vt = try resolveSessionVt(info.session_type, host_env_map, vt);
+    try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, io, host_env_map, session_vt);
     try env_mod.applyTermEnv(session_envmap, host_env_map);
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
@@ -38,7 +54,7 @@ pub fn start(
         .session_info = info,
         .envmap = session_envmap,
         .user_info = user_info,
-        .vt = vt,
+        .vt = session_vt,
     });
 }
 
@@ -93,6 +109,7 @@ pub const Session = struct {
         if (!build_options.x11_support and opts.session_info.session_type == .x11) {
             return error.X11UnsupportedBuild;
         }
+        const session_vt = try resolveSessionVt(opts.session_info.session_type, opts.host_env_map, opts.vt);
 
         var x11_setup: ?X11Setup = null;
         errdefer if (x11_setup) |setup| {
@@ -131,7 +148,7 @@ pub const Session = struct {
                 .x_cmd = x_cmd,
                 .xauth_path = setup.xauth_path,
                 .display = setup.display,
-                .vt = opts.vt,
+                .vt = session_vt,
                 .user = opts.user_info,
                 .environ = session_environ.slice,
             });
@@ -158,7 +175,7 @@ pub const Session = struct {
                 .environ = session_environ.slice,
                 .user_info = opts.user_info,
                 .home_dir = opts.envmap.get("HOME"),
-                .vt = opts.vt,
+                .vt = session_vt,
             });
 
             return .{
@@ -180,7 +197,7 @@ pub const Session = struct {
             .environ = session_environ.slice,
             .user_info = opts.user_info,
             .home_dir = opts.envmap.get("HOME"),
-            .vt = opts.vt,
+            .vt = session_vt,
         });
         return .{ .pid = session_pid };
     }

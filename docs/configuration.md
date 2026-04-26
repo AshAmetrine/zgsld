@@ -46,6 +46,11 @@ command = /usr/bin/zgsld-agetty-greeter
 [x11]
 # X server command with optional args
 command = /bin/X
+
+# VT used for X11 sessions.
+# Leave empty to use the main vt setting.
+# valid values: empty or a VT number
+vt =
 ```
 
 ## Option Reference
@@ -200,12 +205,14 @@ command = /usr/bin/zgsld-agetty-greeter
 ```
 
 ### `[x11]`
+
+This section is only relevant if ZGSLD was built with `-Dx11`.
+
 #### `command`
 
 Sets the X server command used for X11 sessions. Only applicable when zgsld is built with X11 support with `-Dx11`.
 
 - Default: `/bin/X`
-- Availability: only when zgsld is built with `-Dx11`
 - Valid values: X server command with optional args
 
 Example:
@@ -213,4 +220,18 @@ Example:
 ```ini
 [x11]
 command = /bin/X
+```
+
+#### `vt`
+
+Sets the VT used to launch X11 sessions.
+
+- Default: unset
+- Valid values: empty or a VT number such as `7`
+
+Example:
+
+```ini
+[x11]
+vt = 7
 ```

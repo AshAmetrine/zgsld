@@ -47,15 +47,14 @@ pub const WorkerProcess = struct {
                 try worker_envmap.put("XDG_VTNR", vtnr);
             }
         }
-        var vt_buf: [8]u8 = undefined;
-        const vt_value = switch (opts.config.vt) {
-            .unmanaged => "unmanaged",
-            .current => "current",
-            .number => |vt_num| try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num}),
-        };
-        try worker_envmap.put("ZGSLD_VT", vt_value);
+        try putVtEnv(&worker_envmap, "ZGSLD_VT", opts.config.vt);
         if (build_options.x11_support) {
             try worker_envmap.put("ZGSLD_X11_CMD", opts.config.x11.command);
+            if (opts.config.x11.vt) |x11_vt| {
+                var x11_vt_buf: [8]u8 = undefined;
+                const x11_vt_value = try std.fmt.bufPrint(&x11_vt_buf, "{d}", .{x11_vt});
+                try worker_envmap.put("ZGSLD_X11_VT", x11_vt_value);
+            }
         }
 
         const service_name = switch (opts.session_class) {
@@ -143,3 +142,13 @@ pub const WorkerProcess = struct {
         }
     }
 };
+
+fn putVtEnv(envmap: *std.process.Environ.Map, key: []const u8, vt: Config.Vt) !void {
+    var vt_buf: [8]u8 = undefined;
+    const vt_value = switch (vt) {
+        .unmanaged => "unmanaged",
+        .current => "current",
+        .number => |vt_num| try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num}),
+    };
+    try envmap.put(key, vt_value);
+}

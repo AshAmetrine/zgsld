@@ -27,8 +27,10 @@ pub fn run(opts: RunOpts) !void {
     });
     defer pam.deinit();
 
+    const session_vt = try session_mod.resolveSessionVt(opts.info.session_type, opts.env_map, opts.vt);
+
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    if (try opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf)) |tty_path| {
+    if (try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf)) |tty_path| {
         try pam.setItem(.{ .tty = tty_path });
     }
     try pam.accountMgmt(.{});
@@ -39,13 +41,13 @@ pub fn run(opts: RunOpts) !void {
     if (opts.info.session_type == .x11) {
         try session_envmap.put("XDG_SESSION_TYPE", "x11");
     }
-    try opts.vt.activate(opts.io);
+    try session_vt.activate(opts.io);
 
-    var tty_file = try opts.vt.openDevice(opts.io, opts.env_map, .read_write);
+    var tty_file = try session_vt.openDevice(opts.io, opts.env_map, .read_write);
     defer if (tty_file.handle > 2) tty_file.close(opts.io);
-    try opts.vt.establishSessionControllingTty(tty_file.handle);
+    try session_vt.establishSessionControllingTty(tty_file.handle);
 
-    try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.io, opts.env_map, opts.vt);
+    try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.io, opts.env_map, session_vt);
     try env_mod.applyTermEnv(&session_envmap, opts.env_map);
     const user_info = try env_mod.applyUserEnv(&session_envmap, opts.user);
     var session = try session_mod.Session.spawn(opts.allocator, .{
@@ -54,7 +56,7 @@ pub fn run(opts: RunOpts) !void {
         .session_info = opts.info,
         .envmap = &session_envmap,
         .user_info = user_info,
-        .vt = opts.vt,
+        .vt = session_vt,
     });
     defer session.deinit();
 
