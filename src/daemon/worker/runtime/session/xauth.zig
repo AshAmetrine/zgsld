@@ -32,12 +32,12 @@ const Xauth = struct {
 
 const XauthRootDir = struct {
     path: []const u8,
-    dir: std.fs.Dir,
+    dir: std.Io.Dir,
 };
 
-fn mcookie() [Md5.digest_length]u8 {
+fn mcookie(io: std.Io) ![Md5.digest_length]u8 {
     var buf: [4096]u8 = undefined;
-    std.crypto.random.bytes(&buf);
+    try io.randomSecure(&buf);
 
     var out: [Md5.digest_length]u8 = undefined;
     Md5.hash(&buf, &out, .{});
@@ -57,9 +57,9 @@ pub fn createXauthEntry(
 
     const xauth_file = try createUniqueXauthFile(io, path_buf, uid, gid, runtime_dir);
     errdefer std.Io.Dir.deleteFileAbsolute(io, xauth_file.path) catch {};
-    defer xauth_file.file.close();
+    defer xauth_file.file.close(io);
 
-    const magic_cookie = mcookie();
+    const magic_cookie = try mcookie(io);
     var hostname_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
     const hostname = try std.posix.gethostname(&hostname_buf);
 
@@ -72,7 +72,7 @@ pub fn createXauthEntry(
     };
 
     var file_w_buf: [1024]u8 = undefined;
-    var writer = xauth_file.file.writer(&file_w_buf);
+    var writer = xauth_file.file.writer(io, &file_w_buf);
 
     try auth.writeAll(&writer.interface);
 
@@ -81,15 +81,16 @@ pub fn createXauthEntry(
 }
 
 fn resolveXauthDir(
+    io: std.Io,
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
     user_dir_buf: []u8,
     runtime_dir_opt: ?[]const u8,
 ) !XauthRootDir {
     if (runtime_dir_opt) |runtime_dir_raw| {
-        const runtime_dir = std.mem.trimRight(u8, runtime_dir_raw, "/");
+        const runtime_dir = std.mem.trimEnd(u8, runtime_dir_raw, "/");
         if (runtime_dir.len != 0) {
-            if (std.fs.openDirAbsolute(runtime_dir, .{ .no_follow = true })) |dir| {
+            if (std.Io.Dir.openDirAbsolute(io, runtime_dir, .{ .follow_symlinks = false })) |dir| {
                 return .{
                     .path = runtime_dir,
                     .dir = dir,
@@ -99,16 +100,16 @@ fn resolveXauthDir(
     }
 
     const base_dir = "/tmp/zgsld";
-    var tmp_dir = try std.fs.openDirAbsolute("/tmp", .{ .no_follow = true });
-    defer tmp_dir.close();
+    var tmp_dir = try std.Io.Dir.openDirAbsolute(io, "/tmp", .{ .follow_symlinks = false });
+    defer tmp_dir.close(io);
 
-    var base = try utils.ensureOwnedDirAt(tmp_dir, "zgsld", 0o755, 0, 0);
-    defer base.close();
+    var base = try utils.ensureOwnedDirAt(tmp_dir, io, "zgsld", @enumFromInt(0o755), 0, 0);
+    defer base.close(io);
 
     var user_dir_name_buf: [32]u8 = undefined;
     const user_dir_name = try std.fmt.bufPrint(&user_dir_name_buf, "{d}", .{uid});
-    var user_dir = try utils.ensureOwnedDirAt(base, user_dir_name, 0o700, uid, gid);
-    errdefer user_dir.close();
+    var user_dir = try utils.ensureOwnedDirAt(base, io, user_dir_name, @enumFromInt(0o700), uid, gid);
+    errdefer user_dir.close(io);
 
     const user_dir_path = try std.fmt.bufPrint(user_dir_buf, "{s}/{s}", .{ base_dir, user_dir_name });
     return .{
@@ -119,7 +120,7 @@ fn resolveXauthDir(
 
 const CreatedXauthFile = struct {
     path: []const u8,
-    file: std.fs.File,
+    file: std.Io.File,
 };
 
 /// Finds a suitable dir to store the Xauth file,
@@ -132,19 +133,19 @@ fn createUniqueXauthFile(
     runtime_dir: ?[]const u8,
 ) !CreatedXauthFile {
     var base_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var xauth_dir = try resolveXauthDir(uid, gid, &base_buf, runtime_dir);
-    defer xauth_dir.dir.close();
+    var xauth_dir = try resolveXauthDir(io, uid, gid, &base_buf, runtime_dir);
+    defer xauth_dir.dir.close(io);
 
     var attempts: usize = 0;
     while (attempts < 16) : (attempts += 1) {
         var raw: [3]u8 = undefined;
-        std.crypto.random.bytes(&raw);
+        try io.randomSecure(&raw);
         const id = std.fmt.bytesToHex(&raw, .lower);
         const xauthority = try std.fmt.bufPrint(path_buf, "{s}/Xauthority-{s}", .{ xauth_dir.path, id });
         const file_name = std.fs.path.basename(xauthority);
 
-        const file = xauth_dir.dir.createFile(file_name, .{
-            .mode = 0o600,
+        const file = xauth_dir.dir.createFile(io, file_name, .{
+            .permissions = @enumFromInt(0o600),
             .exclusive = true,
             .truncate = false,
         }) catch |err| switch (err) {
@@ -152,10 +153,10 @@ fn createUniqueXauthFile(
             else => return err,
         };
         errdefer {
-            file.close();
+            file.close(io);
             std.Io.Dir.deleteFileAbsolute(io, xauthority) catch {};
         }
-        try file.chown(uid, gid);
+        try file.setOwner(io, uid, gid);
         return .{
             .file = file,
             .path = xauthority,

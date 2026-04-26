@@ -100,7 +100,7 @@ pub const Session = struct {
             allocator.free(setup.xauth_path);
         };
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
-            const display_num = try x11.findFreeDisplay();
+            const display_num = try x11.findFreeDisplay(opts.io);
 
             var display_buf: [4]u8 = undefined;
             const display_env = try std.fmt.bufPrint(&display_buf, ":{d}", .{display_num});
@@ -137,7 +137,7 @@ pub const Session = struct {
             });
 
             errdefer {
-                if (x11.readXServerPid(setup.display)) |pid| {
+                if (x11.readXServerPid(opts.io, setup.display)) |pid| {
                     std.posix.kill(pid, std.posix.SIG.TERM) catch {};
                     if (pid == launcher_pid) {
                         _ = posix.waitpid(pid, 0) catch {};
@@ -149,13 +149,13 @@ pub const Session = struct {
                 }
             }
 
-            const xserver_pid = try x11.waitForXServer(setup.display, launcher_pid, 5000);
+            const xserver_pid = try x11.waitForXServer(opts.io, setup.display, launcher_pid, 5000);
 
             const client_pid = try runSessionCommand(allocator, .{
                 .io = opts.io,
                 .env_map = opts.host_env_map,
                 .cmd = opts.session_info.command,
-                .environ = session_environ,
+                .environ = session_environ.slice,
                 .user_info = opts.user_info,
                 .home_dir = opts.envmap.get("HOME"),
                 .vt = opts.vt,

@@ -75,12 +75,12 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
     return pid;
 }
 
-pub fn findFreeDisplay() !u8 {
+pub fn findFreeDisplay(io: std.Io) !u8 {
     var display: u8 = 0;
     while (display < 200) : (display += 1) {
         var lock_buf: [15]u8 = undefined;
         const lock_path = try std.fmt.bufPrint(&lock_buf, "/tmp/.X{d}-lock", .{display});
-        std.fs.accessAbsolute(lock_path, .{}) catch |err| switch (err) {
+        std.Io.Dir.accessAbsolute(io, lock_path, .{}) catch |err| switch (err) {
             error.FileNotFound => break,
             error.AccessDenied, error.PermissionDenied => {},
             else => return err,
@@ -92,14 +92,14 @@ pub fn findFreeDisplay() !u8 {
 }
 
 // When X server detaches, we can get the PID from the lock file
-pub fn readXServerPid(display: u8) ?std.posix.pid_t {
+pub fn readXServerPid(io: std.Io, display: u8) ?std.posix.pid_t {
     var lock_buf: [15]u8 = undefined;
     const lock_path = std.fmt.bufPrint(&lock_buf, "/tmp/.X{d}-lock", .{display}) catch return null;
-    const lock_file = std.fs.openFileAbsolute(lock_path, .{ .mode = .read_only }) catch return null;
-    defer lock_file.close();
+    const lock_file = std.Io.Dir.openFileAbsolute(io, lock_path, .{ .mode = .read_only }) catch return null;
+    defer lock_file.close(io);
 
     var rbuf: [32]u8 = undefined;
-    var reader = lock_file.reader(&rbuf);
+    var reader = lock_file.reader(io, &rbuf);
 
     var buf: [32]u8 = undefined;
     const n = reader.interface.readSliceShort(&buf) catch return null;
@@ -109,15 +109,17 @@ pub fn readXServerPid(display: u8) ?std.posix.pid_t {
     return std.fmt.parseInt(std.posix.pid_t, pid_str, 10) catch return null;
 }
 
-fn isXServerListening(display: u8) bool {
+fn isXServerListening(io: std.Io, display: u8) bool {
     var path_buf: [64]u8 = undefined;
     const socket_path = std.fmt.bufPrint(&path_buf, "/tmp/.X11-unix/X{d}", .{display}) catch return false;
-    const stream = std.net.connectUnixSocket(socket_path) catch return false;
-    stream.close();
+    const address = std.Io.net.UnixAddress.init(socket_path) catch return false;
+    const stream = address.connect(io) catch return false;
+    defer stream.close(io);
     return true;
 }
 
 pub fn waitForXServer(
+    io: std.Io,
     display: u8,
     launcher_pid: std.posix.pid_t,
     timeout_ms: u32,
@@ -126,8 +128,8 @@ pub fn waitForXServer(
     var launcher_exited = false;
     while (elapsed < timeout_ms) : (elapsed += 50) {
         // The lock PID can appear before the socket is actually ready.
-        if (readXServerPid(display)) |pid| {
-            if (isXServerListening(display)) return pid;
+        if (readXServerPid(io, display)) |pid| {
+            if (isXServerListening(io, display)) return pid;
         }
 
         if (!launcher_exited) {
@@ -138,7 +140,7 @@ pub fn waitForXServer(
             }
         }
 
-        std.Thread.sleep(50 * std.time.ns_per_ms);
+        try io.sleep(.fromMilliseconds(50), .awake);
     }
     // If the launcher exited, treat this as an X server failure instead of a timeout.
     return if (launcher_exited) error.XServerExited else error.XServerTimeout;

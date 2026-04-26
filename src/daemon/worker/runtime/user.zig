@@ -18,29 +18,60 @@ pub fn dropPrivileges(user_info: UserInfo) !void {
 }
 
 pub fn ensureOwnedDirAt(
-    parent: std.fs.Dir,
+    parent: std.Io.Dir,
+    io: std.Io,
     name: []const u8,
-    mode: u32,
+    permissions: std.Io.Dir.Permissions,
     uid: std.posix.uid_t,
     gid: std.posix.gid_t,
-) !std.fs.Dir {
+) !std.Io.Dir {
     const created = blk: {
-        parent.makeDir(name) catch |err| switch (err) {
+        parent.createDir(io, name, permissions) catch |err| switch (err) {
             error.PathAlreadyExists => break :blk false,
             else => return err,
         };
         break :blk true;
     };
 
-    var dir = try parent.openDir(name, .{ .no_follow = true });
-    errdefer dir.close();
+    var dir = try parent.openDir(io, name, .{ .follow_symlinks = false, .iterate = true });
+    errdefer dir.close(io);
 
-    const stat = try std.posix.fstat(dir.fd);
+    const owner = try getOwner(dir);
     if (created) {
-        try dir.chown(uid, gid);
-    } else if (stat.uid != uid or stat.gid != gid) {
+        try dir.setOwner(io, uid, gid);
+    } else if (owner.uid != uid or owner.gid != gid) {
         return error.UnsafePathOwnership;
     }
-    try dir.chmod(mode);
+    try dir.setPermissions(io, permissions);
     return dir;
+}
+
+fn getOwner(dir: std.Io.Dir) !struct { uid: std.posix.uid_t, gid: std.posix.gid_t } {
+    switch (comptime builtin.os.tag) {
+        .linux => {
+            const linux = std.os.linux;
+            var statx = std.mem.zeroes(linux.Statx);
+            switch (linux.errno(linux.statx(
+                dir.handle,
+                "",
+                linux.AT.EMPTY_PATH,
+                .{ .UID = true, .GID = true },
+                &statx,
+            ))) {
+                .SUCCESS => {
+                    if (!statx.mask.UID or !statx.mask.GID) return error.Unexpected;
+                    return .{ .uid = statx.uid, .gid = statx.gid };
+                },
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
+        },
+        else => {
+            var stat: std.c.Stat = undefined;
+            const rc = std.c.fstat(dir.handle, &stat);
+            switch (std.c.errno(rc)) {
+                .SUCCESS => return .{ .uid = stat.uid, .gid = stat.gid },
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
+        },
+    }
 }
