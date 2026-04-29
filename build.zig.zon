@@ -12,8 +12,8 @@
         },
 
         .zigini = .{
-            .url = "git+https://github.com/AshAmetrine/zigini#a665d081dda42664a96da2840ea09c5ccf9d0692",
-            .hash = "zigini-0.5.0-BSkB7e9WAACfyCBABNZiWL3gFMw18GKn3qBcPs8L1Ec1",
+            .url = "git+https://github.com/ashametrine/zigini#c53676e8f45962340d635e613977d0629eeff684",
+            .hash = "zigini-0.5.0-BSkB7dRWAACO6VEkG1B5AhUx7jmZ-Kfh1eyiu65z8DT7",
             .lazy = true,
         },
 
