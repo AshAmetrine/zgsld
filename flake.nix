@@ -3,29 +3,47 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    zigOverlay.url = "github:mitchellh/zig-overlay";
-    zigOverlay.inputs.nixpkgs.follows = "nixpkgs";
-    treefmt-nix.url = "github:numtide/treefmt-nix";
-    treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    zig-overlay = {
+      url = "github:mitchellh/zig-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    zls-flake = {
+      url = "github:zigtools/zls/0.16.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      zigOverlay,
+      zig-overlay,
+      zls-flake,
       treefmt-nix,
       ...
     }:
     let
       inherit (nixpkgs) lib;
       forAllSystems = lib.genAttrs lib.systems.flakeExposed;
-      zigPkgOverlay = final: _prev: {
-        zig = zigOverlay.packages.${final.stdenv.hostPlatform.system}."0.16.0";
-      };
       zgsldOverlay = final: _prev: {
         zgsld = final.callPackage ./nix/package.nix { };
       };
+      zigDevOverlay =
+        final: prev:
+        let
+          system = prev.stdenv.hostPlatform.system;
+        in
+        {
+          zls = zls-flake.packages.${system}.zls;
+          zig = zig-overlay.packages.${system}."0.16.0";
+        };
     in
     {
       overlays.default = zgsldOverlay;
@@ -40,10 +58,9 @@
           {
             imports = [ ./nix/module.nix ];
             nixpkgs.overlays = [
-              zigPkgOverlay
+              zigDevOverlay
               self.overlays.default
             ];
-            #services.zgsld.package = lib.mkDefault self.packages.${pkgs.system}.default;
           };
         default = self.nixosModules.zgsld;
       };
@@ -54,7 +71,7 @@
           pkgs = import nixpkgs {
             inherit system;
             overlays = [
-              zigPkgOverlay
+              zigDevOverlay
               zgsldOverlay
             ];
           };
@@ -71,7 +88,7 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ zigPkgOverlay ];
+            overlays = [ zigDevOverlay ];
           };
         in
         (treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix).config.build.wrapper
@@ -82,7 +99,7 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ zigPkgOverlay ];
+            overlays = [ zigDevOverlay ];
           };
         in
         {
