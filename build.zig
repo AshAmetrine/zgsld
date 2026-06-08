@@ -31,7 +31,6 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption([]const u8, "x11_cmd", x11_cmd);
     const build_options_mod = build_options.createModule();
 
-
     const translate_c = b.addTranslateC(.{
         .root_source_file = b.path("src/c.h"),
         .target = target,

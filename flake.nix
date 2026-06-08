@@ -5,10 +5,18 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     zigOverlay.url = "github:mitchellh/zig-overlay";
     zigOverlay.inputs.nixpkgs.follows = "nixpkgs";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
+    treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
-    { self, nixpkgs, zigOverlay, ... }:
+    {
+      self,
+      nixpkgs,
+      zigOverlay,
+      treefmt-nix,
+      ...
+    }:
     let
       inherit (nixpkgs) lib;
       forAllSystems = lib.genAttrs lib.systems.flakeExposed;
@@ -61,9 +69,12 @@
       formatter = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ zigPkgOverlay ];
+          };
         in
-        pkgs.nixfmt-tree
+        (treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix).config.build.wrapper
       );
 
       devShells = forAllSystems (

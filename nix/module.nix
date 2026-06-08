@@ -18,21 +18,20 @@ let
     globalSection = {
       vt = cfg.vt;
     };
-    sections =
-      {
-        session = {
-          service_name = "zgsld";
-        };
-        greeter = {
-          user = "greeter";
-          service_name = "zgsld-greeter";
-          session_type = cfg.greeter.sessionType;
-          command = cfg.greeter.command;
-        };
-      }
-      // lib.optionalAttrs x11Support {
-        x11.command = x11Command;
+    sections = {
+      session = {
+        service_name = "zgsld";
       };
+      greeter = {
+        user = "greeter";
+        service_name = "zgsld-greeter";
+        session_type = cfg.greeter.sessionType;
+        command = cfg.greeter.command;
+      };
+    }
+    // lib.optionalAttrs x11Support {
+      x11.command = x11Command;
+    };
   };
 
   finalConfig = lib.recursiveUpdate defaultConfig cfg.settings;
