@@ -70,9 +70,11 @@ pub fn init(opts: Options) Self {
 }
 
 pub fn run(self: Self) !void {
-    if (build_options.standalone and daemon.worker.isSessionWorker(self.process.args)) {
-        try worker_runtime.run(self.process);
-        return;
+    if (build_options.standalone) {
+        if (try worker_runtime.parseArgs(self.process.args)) |opts| {
+            try worker_runtime.run(self.process, opts);
+            return;
+        }
     }
 
     var sock_fd: ?std.posix.fd_t = null;

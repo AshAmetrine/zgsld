@@ -23,8 +23,8 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const process = zgsld.ProcessContext.fromInit(init);
 
-    if (daemon.worker.isSessionWorker(init.minimal.args)) {
-        try worker_runtime.run(process);
+    if (try worker_runtime.parseArgs(init.minimal.args)) |opts| {
+        try worker_runtime.run(process, opts);
         return;
     }
 

@@ -12,25 +12,40 @@ const SessionClass = @import("process.zig").SessionClass;
 
 const Greeter = greeter_mod.Greeter;
 
-pub fn run(process: ProcessContext) !void {
+pub const Options = struct {
+    session_class: SessionClass,
+    service_name: []const u8,
+    greeter_username: ?[:0]const u8 = null,
+};
+
+pub fn parseArgs(args: std.process.Args) !?Options {
+    var arg_it = args.iterate();
+    if (!arg_it.skip()) return null;
+    const arg = arg_it.next() orelse return null;
+    if (!std.mem.eql(u8, "--session-worker", arg)) return null;
+
+    const session_class_arg = arg_it.next() orelse return error.MissingWorkerArgs;
+    const session_class = std.meta.stringToEnum(SessionClass, session_class_arg) orelse return error.InvalidSessionClass;
+
+    const service_name = arg_it.next() orelse return error.MissingWorkerArgs;
+    const greeter_username = if (session_class == .greeter)
+        arg_it.next() orelse return error.MissingWorkerArgs
+    else
+        null;
+
+    return .{
+        .session_class = session_class,
+        .service_name = service_name,
+        .greeter_username = greeter_username,
+    };
+}
+
+pub fn run(process: ProcessContext, opts: Options) !void {
     signals.installHandlers();
-
-    var arg_it = process.args.iterate();
-    if (!arg_it.skip()) return error.MissingWorkerArgs;
-
-    const session_class = if (arg_it.next()) |arg| blk: {
-        break :blk std.meta.stringToEnum(SessionClass, arg) orelse return error.InvalidSessionClass;
-    } else return error.MissingWorkerArgs;
-
-    const service = arg_it.next() orelse return error.MissingWorkerArgs;
-
-    const greeter_username: ?[:0]const u8 = if (session_class == .greeter) blk: {
-        break :blk arg_it.next() orelse return error.MissingWorkerArgs;
-    } else null;
 
     const vt = try Vt.parse(process.environ_map.get("ZGSLD_VT"));
 
-    switch (session_class) {
+    switch (opts.session_class) {
         .greeter => {
             const sock_fd = try parseZgsldSock(process.environ_map);
             const greeter_cmd = process.environ_map.get("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
@@ -38,8 +53,8 @@ pub fn run(process: ProcessContext) !void {
             const greeter_session_type = std.meta.stringToEnum(Ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
 
             var greeter = try Greeter.init(process.gpa, .{
-                .service_name = service,
-                .username = greeter_username.?,
+                .service_name = opts.service_name,
+                .username = opts.greeter_username.?,
                 .vt = vt,
                 .io = process.io,
                 .env_map = process.environ_map,
@@ -68,7 +83,7 @@ pub fn run(process: ProcessContext) !void {
                 .allocator = process.gpa,
                 .io = process.io,
                 .env_map = process.environ_map,
-                .service_name = service,
+                .service_name = opts.service_name,
                 .ipc_conn = &ipc_conn,
                 .vt = vt,
             });
@@ -85,7 +100,7 @@ pub fn run(process: ProcessContext) !void {
                 .allocator = process.gpa,
                 .io = process.io,
                 .env_map = process.environ_map,
-                .service_name = service,
+                .service_name = opts.service_name,
                 .user = autologin_user_z,
                 .info = .{
                     .session_type = autologin_session_type,
