@@ -14,6 +14,11 @@ const Vt = @import("vt").Vt;
 
 const log = std.log.scoped(.zgsld_worker);
 
+const StderrMode = enum {
+    inherit,
+    tty,
+};
+
 pub fn resolveSessionVt(
     session_type: Ipc.SessionType,
     host_env_map: *const std.process.Environ.Map,
@@ -103,6 +108,7 @@ pub const Session = struct {
         envmap: *std.process.Environ.Map,
         user_info: UserInfo,
         vt: Vt,
+        stderr: StderrMode = .tty,
     };
 
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOpts) !Session {
@@ -176,6 +182,7 @@ pub const Session = struct {
                 .user_info = opts.user_info,
                 .home_dir = opts.envmap.get("HOME"),
                 .vt = session_vt,
+                .stderr = opts.stderr,
             });
 
             return .{
@@ -198,6 +205,7 @@ pub const Session = struct {
             .user_info = opts.user_info,
             .home_dir = opts.envmap.get("HOME"),
             .vt = session_vt,
+            .stderr = opts.stderr,
         });
         return .{ .pid = session_pid };
     }
@@ -210,6 +218,7 @@ pub const Session = struct {
         home_dir: ?[]const u8,
         environ: [:null]const ?[*:0]const u8,
         vt: Vt,
+        stderr: StderrMode,
     };
 
     fn runSessionCommand(allocator: std.mem.Allocator, opts: SessionCommandOpts) !std.posix.pid_t {
@@ -222,7 +231,7 @@ pub const Session = struct {
 
         const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
 
-        return try startCommandSession(opts.io, opts.env_map, opts.user_info, opts.home_dir, &wrapper, opts.environ, opts.vt);
+        return try startCommandSession(opts.io, opts.env_map, opts.user_info, opts.home_dir, &wrapper, opts.environ, opts.vt, opts.stderr);
     }
 };
 
@@ -234,6 +243,7 @@ fn startCommandSession(
     argv: [:null]const ?[*:0]const u8,
     session_environ: [:null]const ?[*:0]const u8,
     vt: Vt,
+    stderr: StderrMode,
 ) !std.posix.pid_t {
     const session_pid = blk: {
         const child_pid = std.c.fork();
@@ -253,7 +263,10 @@ fn startCommandSession(
             };
             defer if (tty_file.handle > 2) tty_file.close(io);
 
-            tty.redirectStdioToTty(tty_file.handle) catch |err| {
+            (switch (stderr) {
+                .inherit => tty.redirectStdinAndStdoutToTty(tty_file.handle),
+                .tty => tty.redirectStdioToTty(tty_file.handle),
+            }) catch |err| {
                 log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
                 std.process.exit(1);
             };

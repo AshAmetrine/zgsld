@@ -91,17 +91,6 @@ pub const Greeter = struct {
         const zgsld_sock = try std.fmt.bufPrint(&fd_buf, "{d}", .{ipc_fd});
         try envmap.put("ZGSLD_SOCK", zgsld_sock);
 
-        const log_fd = blk: {
-            const fd = std.c.dup(std.posix.STDERR_FILENO);
-            if (fd < 0) {
-                return std.posix.unexpectedErrno(std.c.errno(fd));
-            }
-            break :blk fd;
-        };
-        defer _ = std.c.close(log_fd);
-        var log_fd_buf: [16]u8 = undefined;
-        const log_fd_str = try std.fmt.bufPrintZ(&log_fd_buf, "{d}", .{log_fd});
-        try envmap.put("ZGSLD_LOG", log_fd_str);
         try env_mod.applyTermEnv(&envmap, env_map);
 
         const session_info: Ipc.SessionInfo = .{
@@ -119,6 +108,7 @@ pub const Greeter = struct {
             .envmap = &envmap,
             .user_info = self.user_info,
             .vt = session_vt,
+            .stderr = .inherit,
         });
 
         return self.session.?.pid;

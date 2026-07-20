@@ -10,8 +10,6 @@ const zigini = @import("zigini");
 
 const log = std.log.scoped(.zgsld);
 
-pub const std_options: std.Options = .{ .logFn = zgsld.logFn };
-
 const clap_param_str =
     \\-h, --help                Shows all commands.
     \\-v, --version             Shows the version of zgsld.
