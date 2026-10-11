@@ -10,7 +10,7 @@
     };
 
     zls-flake = {
-      url = "github:zigtools/zls/0.16.0";
+      url = "github:zigtools/zls/0.17.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -42,7 +42,7 @@
         in
         {
           zls = zls-flake.packages.${system}.zls;
-          zig = zig-overlay.packages.${system}."0.16.0";
+          zig = zig-overlay.packages.${system}."0.17.0";
         };
     in
     {

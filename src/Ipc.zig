@@ -138,7 +138,7 @@ pub const Connection = struct {
     fn readHeader(io_reader: *std.Io.Reader) !struct { tag: EventType, payload_len: usize } {
         const tag_num = try io_reader.takeInt(u8, native);
         const payload_len_u32 = try io_reader.takeInt(u32, native);
-        const tag: EventType = @enumFromInt(tag_num);
+        const tag: EventType = @fromBackingInt(@intCast(tag_num));
         return .{
             .tag = tag,
             .payload_len = @intCast(payload_len_u32),
@@ -146,7 +146,7 @@ pub const Connection = struct {
     }
 
     fn writeHeader(io_writer: *std.Io.Writer, tag: EventType, payload_len: u32) !void {
-        try io_writer.writeInt(u8, @intFromEnum(tag), native);
+        try io_writer.writeInt(u8, @backingInt(tag), native);
         try io_writer.writeInt(u32, payload_len, native);
     }
 
@@ -204,7 +204,7 @@ pub const Connection = struct {
             },
             .start_session => blk: {
                 if (payload_len < 3) return error.InvalidPayload;
-                const session_type: SessionType = @enumFromInt(event_buf[0]);
+                const session_type: SessionType = @fromBackingInt(@intCast(event_buf[0]));
                 const flags = event_buf[1];
                 const session_cmd = event_buf[2..payload_len];
                 if (session_cmd.len == 0) return error.InvalidPayload;
@@ -278,7 +278,7 @@ pub const Connection = struct {
                 }
                 const payload_len: u32 = @intCast(cmd.session_cmd.len + 2);
                 try writeHeader(io_writer, .start_session, payload_len);
-                try io_writer.writeInt(u8, @intFromEnum(info.session_type), native);
+                try io_writer.writeInt(u8, @backingInt(info.session_type), native);
                 const flags: u8 = if (cmd.source_profile) 0x01 else 0x00;
                 try io_writer.writeInt(u8, flags, native);
                 try io_writer.writeAll(cmd.session_cmd);

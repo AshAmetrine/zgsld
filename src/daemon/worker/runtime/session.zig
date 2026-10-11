@@ -132,7 +132,7 @@ pub const Session = struct {
             var xauth_buf: [std.fs.max_path_bytes]u8 = undefined;
             const runtime_dir = opts.envmap.get("XDG_RUNTIME_DIR");
             const xauth_path = try x11.xauth.createXauthEntry(opts.io, &xauth_buf, display_env[1..], opts.user_info.uid, opts.user_info.gid, runtime_dir);
-            const xauth_path_z = try allocator.dupeZ(u8, xauth_path);
+            const xauth_path_z = try allocator.dupeSentinel(u8, xauth_path, 0);
             try opts.envmap.put("XAUTHORITY", xauth_path_z);
 
             x11_setup = .{
@@ -275,7 +275,7 @@ fn startCommandSession(
         utils.dropPrivileges(user_info) catch std.process.exit(1);
         if (home_dir) |dir| {
             var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const dir_z = std.fmt.bufPrintZ(&dir_buf, "{s}", .{dir}) catch std.process.exit(1);
+            const dir_z = std.fmt.bufPrintSentinel(&dir_buf, "{s}", .{dir}, 0) catch std.process.exit(1);
             if (std.c.chdir(dir_z) != 0) std.process.exit(1);
         } else {
             if (std.c.chdir("/") != 0) std.process.exit(1);

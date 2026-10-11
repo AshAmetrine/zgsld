@@ -2,25 +2,24 @@
     .name = .zgsld,
     .version = "0.1.0",
     .fingerprint = 0x691972a6afdfe43, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         // CLI Dependencies
         .clap = .{
-            .url = "git+https://github.com/Hejsil/zig-clap#fc1e5cc3f6d9d3001112385ee6256d694e959d2f",
-            .hash = "clap-0.11.0-oBajB7foAQC3Iyn4IVCkUdYaOVVng5IZkSncySTjNig1",
+            .url = "git+https://github.com/Hejsil/zig-clap#05faf3905e8548f5cc269a8836e154065e70128d",
+            .hash = "clap-0.12.0-oBajB4XpAQCF1WRKnD5KOKPsnwwT_NNdAJ7Ww3irYJac",
             .lazy = true,
         },
-
         .zigini = .{
-            .url = "git+https://github.com/ashametrine/zigini#c53676e8f45962340d635e613977d0629eeff684",
-            .hash = "zigini-0.5.0-BSkB7dRWAACO6VEkG1B5AhUx7jmZ-Kfh1eyiu65z8DT7",
+            .url = "git+https://github.com/ashametrine/zigini#9d0a918c4d2f55bac05ddc9524fcaed7c2279d6c",
+            .hash = "zigini-0.6.0-BSkB7UtYAADFPMY2JFpY0cb2ozdua0J4nARLZguCzrA8",
             .lazy = true,
         },
 
         // Lib Dependencies
         .zig_pam = .{
-            .url = "git+https://github.com/AshAmetrine/zig-pam#a89d1422e66b05ecb12692e204ed2e9f9d50da30",
-            .hash = "zig_pam-0.1.0--cHVhmdZAAB2X_uNQpuo-CI_NT4YJBDWVo6WN8rlDxIp",
+            .url = "git+https://github.com/ashametrine/zig-pam#621ab029084f0401d06caa57928fecb378720cc1",
+            .hash = "zig_pam-0.2.0--cHVhiJbAADmwXTlw4tcdJLwmJlRW3Ejv1R1w_wpeGWt",
             .lazy = true,
         },
     },

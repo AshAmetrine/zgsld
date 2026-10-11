@@ -14,7 +14,7 @@ const Xauth = struct {
     data: []const u8,
 
     pub fn writeAll(self: Xauth, writer: *std.Io.Writer) !void {
-        try writer.writeInt(u16, @intFromEnum(self.family), .big);
+        try writer.writeInt(u16, @backingInt(self.family), .big);
 
         try writer.writeInt(u16, @intCast(self.address.len), .big);
         try writer.writeAll(self.address);
@@ -103,12 +103,12 @@ fn resolveXauthDir(
     var tmp_dir = try std.Io.Dir.openDirAbsolute(io, "/tmp", .{ .follow_symlinks = false });
     defer tmp_dir.close(io);
 
-    var base = try utils.ensureOwnedDirAt(tmp_dir, io, "zgsld", @enumFromInt(0o755), 0, 0);
+    var base = try utils.ensureOwnedDirAt(tmp_dir, io, "zgsld", @fromBackingInt(@intCast(0o755)), 0, 0);
     defer base.close(io);
 
     var user_dir_name_buf: [32]u8 = undefined;
     const user_dir_name = try std.fmt.bufPrint(&user_dir_name_buf, "{d}", .{uid});
-    var user_dir = try utils.ensureOwnedDirAt(base, io, user_dir_name, @enumFromInt(0o700), uid, gid);
+    var user_dir = try utils.ensureOwnedDirAt(base, io, user_dir_name, @fromBackingInt(@intCast(0o700)), uid, gid);
     errdefer user_dir.close(io);
 
     const user_dir_path = try std.fmt.bufPrint(user_dir_buf, "{s}/{s}", .{ base_dir, user_dir_name });
@@ -145,7 +145,7 @@ fn createUniqueXauthFile(
         const file_name = std.fs.path.basename(xauthority);
 
         const file = xauth_dir.dir.createFile(io, file_name, .{
-            .permissions = @enumFromInt(0o600),
+            .permissions = @fromBackingInt(@intCast(0o600)),
             .exclusive = true,
             .truncate = false,
         }) catch |err| switch (err) {

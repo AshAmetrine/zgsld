@@ -62,7 +62,7 @@ pub fn run(opts: RunOpts) !void {
             },
             .pam_start_auth => |auth| {
                 saw_auth = true;
-                const user_z = try opts.allocator.dupeZ(u8, auth.user);
+                const user_z = try opts.allocator.dupeSentinel(u8, auth.user, 0);
                 defer opts.allocator.free(user_z);
 
                 var pam_ctx: PamCtx = .{

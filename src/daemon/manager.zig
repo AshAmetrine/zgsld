@@ -389,7 +389,7 @@ fn shouldRunAutologin(config: Config) !bool {
 
 fn userExists(user: []const u8) !bool {
     var user_buf: [64]u8 = undefined;
-    const user_z = try std.fmt.bufPrintZ(&user_buf, "{s}", .{user});
+    const user_z = try std.fmt.bufPrintSentinel(&user_buf, "{s}", .{user}, 0);
     return std.c.getpwnam(user_z) != null;
 }
 

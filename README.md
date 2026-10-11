@@ -10,7 +10,7 @@ ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greet
 
 ## Dependencies
 
-- Zig 0.16.0
+- Zig 0.17.0
 - libc
 - pam
 

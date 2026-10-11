@@ -82,7 +82,7 @@ pub const WorkerProcess = struct {
                     @tagName(opts.config.greeter.session_type),
                 );
                 try worker_envmap.put("ZGSLD_GREETER_CMD", greeter_cmd_str);
-                greeter_user_z = try arena_allocator.dupeZ(u8, opts.config.greeter.user);
+                greeter_user_z = try arena_allocator.dupeSentinel(u8, opts.config.greeter.user, 0);
             },
             .autologin => {
                 const autologin_user = opts.config.autologin.user orelse return error.NullAutologinUser;
@@ -100,7 +100,7 @@ pub const WorkerProcess = struct {
 
         const worker_environ = try worker_envmap.createPosixBlock(arena_allocator, .{});
 
-        const service_name_z = try arena_allocator.dupeZ(u8, service_name);
+        const service_name_z = try arena_allocator.dupeSentinel(u8, service_name, 0);
 
         const argv = [_:null]?[*:0]const u8{
             @ptrCast(opts.worker_path.ptr),

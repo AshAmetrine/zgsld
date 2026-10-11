@@ -101,9 +101,8 @@ pub fn build(b: *std.Build) !void {
     });
     const docs_step = b.step("docs", "Generate documentation");
     docs_step.dependOn(&docs_install.step);
-
     const fmt_step = b.step("fmt", "Format source files");
-    const fmt_cmd = b.addFmt(.{ .paths = &.{ "build.zig", "build.zig.zon", "src" } });
+    const fmt_cmd = b.addFmt(.{ .paths = b.pathList(&.{ "build.zig", "build.zig.zon", "src" }) });
     fmt_step.dependOn(&fmt_cmd.step);
 
     // ZGSLD CLI
@@ -133,18 +132,17 @@ pub fn build(b: *std.Build) !void {
 
 fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) ![]const u8 {
     const version_str = b.fmt("{d}.{d}.{d}", .{ version.major, version.minor, version.patch });
-
-    var status: u8 = undefined;
-    const git_describe_raw = b.runAllowFail(&[_][]const u8{
+    const git_describe_raw = switch (b.runFallible(&[_][]const u8{
         "git",
         "-C",
-        b.build_root.path orelse ".",
+        b.root.root_dir.path orelse ".",
         "describe",
         "--match",
         "*.*.*",
         "--tags",
-    }, &status, .ignore) catch {
-        return version_str;
+    }, .{ .stderr_behavior = .ignore })) {
+        .success => |stdout| stdout,
+        else => return version_str,
     };
     var git_describe = std.mem.trim(u8, git_describe_raw, " \n\r");
     git_describe = std.mem.trimStart(u8, git_describe, "v");

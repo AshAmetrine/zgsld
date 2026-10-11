@@ -33,7 +33,7 @@ pub fn shutdownRequested() bool {
 }
 
 pub fn shutdownSignal() std.posix.SIG {
-    return @enumFromInt(shutdown_signal.load(.seq_cst));
+    return @fromBackingInt(@intCast(shutdown_signal.load(.seq_cst)));
 }
 
 pub fn setActiveChild(pid: std.posix.pid_t) void {
@@ -53,7 +53,7 @@ pub fn forwardShutdownSignal(sig: std.posix.SIG) void {
 }
 
 fn handleShutdownSignal(sig: std.posix.SIG) callconv(.c) void {
-    shutdown_signal.store(@intFromEnum(sig), .seq_cst);
+    shutdown_signal.store(@backingInt(sig), .seq_cst);
     forwardShutdownSignal(sig);
 }
 

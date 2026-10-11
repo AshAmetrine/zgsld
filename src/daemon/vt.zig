@@ -68,14 +68,14 @@ pub const Vt = union(enum) {
         if (wait_status != 0) return error.FailedToWaitForActiveTty;
     }
 
-    pub fn open(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.File.OpenMode) !std.Io.File {
+    pub fn open(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
         return switch (self) {
             .unmanaged, .current => openControllingTty(io, mode),
             .number => self.openDevice(io, env_map, mode),
         };
     }
 
-    pub fn openDevice(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.File.OpenMode) !std.Io.File {
+    pub fn openDevice(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const tty_path = (try self.resolveTtyDevicePath(io, env_map, &path_buf)) orelse return error.InvalidTtyPath;
         return try std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = mode });
@@ -193,8 +193,8 @@ pub const Vt = union(enum) {
             raw.lflag.ECHO = false;
             raw.lflag.ECHONL = false;
             raw.lflag.ISIG = false;
-            raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
-            raw.cc[@intFromEnum(std.posix.V.TIME)] = 0;
+            raw.cc[@backingInt(std.posix.V.MIN)] = 0;
+            raw.cc[@backingInt(std.posix.V.TIME)] = 0;
             try std.posix.tcsetattr(tty_file.handle, .FLUSH, raw);
 
             return .{
@@ -241,15 +241,15 @@ fn getTtyDevicePath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![:0]const u
     if (target_vt == 0) return error.InvalidTty;
 
     return switch (builtin.os.tag) {
-        .linux => std.fmt.bufPrintZ(buf, "/dev/tty{d}", .{target_vt}),
-        .freebsd => std.fmt.bufPrintZ(buf, "/dev/ttyv{x}", .{target_vt - 1}),
+        .linux => std.fmt.bufPrintSentinel(buf, "/dev/tty{d}", .{target_vt}, 0),
+        .freebsd => std.fmt.bufPrintSentinel(buf, "/dev/ttyv{x}", .{target_vt - 1}, 0),
         else => error.UnsupportedPlatform,
     };
 }
 
 fn ttyPathFromFd(fd: std.posix.fd_t, buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     const rc = ttyname_r(fd, @ptrCast(buf), buf.len);
-    if (rc != 0) return std.posix.unexpectedErrno(@enumFromInt(rc));
+    if (rc != 0) return std.posix.unexpectedErrno(@fromBackingInt(@intCast(rc)));
 
     const tty_path = std.mem.sliceTo(buf, 0);
     return buf[0..tty_path.len :0];
@@ -329,7 +329,7 @@ fn openVtControlDevice(io: std.Io) !std.Io.File {
     };
 }
 
-fn openControllingTty(io: std.Io, mode: std.Io.File.OpenMode) !std.Io.File {
+fn openControllingTty(io: std.Io, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
     return std.Io.Dir.openFileAbsolute(io, "/dev/tty", .{ .mode = mode });
 }
 

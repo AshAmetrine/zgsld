@@ -93,7 +93,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             const autologin_session_type_raw = process.environ_map.get("ZGSLD_AUTOLOGIN_SESSION_TYPE") orelse return error.MissingAutologinSessionType;
             const autologin_session_type = std.meta.stringToEnum(Ipc.SessionType, autologin_session_type_raw) orelse return error.InvalidAutologinSessionType;
             const autologin_cmd = process.environ_map.get("ZGSLD_AUTOLOGIN_CMD") orelse return error.MissingAutologinCmd;
-            const autologin_user_z = try process.gpa.dupeZ(u8, autologin_user);
+            const autologin_user_z = try process.gpa.dupeSentinel(u8, autologin_user, 0);
             defer process.gpa.free(autologin_user_z);
 
             try autologin.run(.{
