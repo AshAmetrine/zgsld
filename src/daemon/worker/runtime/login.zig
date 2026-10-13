@@ -96,7 +96,7 @@ pub fn run(opts: RunOpts) !void {
                 try runSession(opts.allocator, opts.io, opts.env_map, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
                 return;
             },
-            else => unreachable,
+            else => return error.UnexpectedEvent,
         }
     }
 }
@@ -183,7 +183,7 @@ fn getSession(
                     .env = session_envmap,
                 };
             },
-            else => unreachable,
+            else => return error.UnexpectedEvent,
         }
     }
     return null;

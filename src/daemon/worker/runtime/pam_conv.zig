@@ -45,7 +45,7 @@ pub fn loginConv(
                         ctx.cancelled = true;
                         return error.Abort;
                     },
-                    else => unreachable,
+                    else => return error.UnexpectedEvent,
                 }
             },
             .text_info, .error_msg => |m| {
