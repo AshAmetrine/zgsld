@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const posix = @import("posix");
 const env_mod = @import("env.zig");
 const session_mod = @import("session.zig");
@@ -15,7 +15,7 @@ pub const RunOpts = struct {
     env_map: *const std.process.Environ.Map,
     service_name: []const u8,
     user: [:0]const u8,
-    info: Ipc.SessionInfo,
+    info: ipc.SessionInfo,
     vt: Vt,
 };
 

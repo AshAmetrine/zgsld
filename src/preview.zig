@@ -1,19 +1,23 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const SocketPair = @import("SocketPair.zig");
 pub const api = @import("preview/api.zig");
-const Options = api.Options;
 
 pub const Runtime = struct {
     io: std.Io,
-    ipc_conn: Ipc.Connection,
+    ipc_conn: ipc.Connection,
     thread: ?std.Thread,
     ctx: *Runtime.ServerCtx,
 
+    pub const Options = struct {
+        codec: *const ipc.Codec = &ipc.Codec.binary,
+        preview: api.Options = .{},
+    };
+
     pub const ServerCtx = struct {
         io: std.Io,
-        conn: Ipc.Connection,
-        opts: Options,
+        conn: ipc.Connection,
+        opts: api.Options,
         err: ?anyerror,
     };
 
@@ -22,13 +26,13 @@ pub const Runtime = struct {
 
         ctx.* = .{
             .io = io,
-            .conn = Ipc.Connection.init(fds.parent),
-            .opts = opts,
+            .conn = ipc.Connection.init(fds.parent, .{ .codec = opts.codec }),
+            .opts = opts.preview,
             .err = null,
         };
         errdefer ctx.conn.deinit(io);
 
-        var ipc_conn = Ipc.Connection.init(fds.child);
+        var ipc_conn = ipc.Connection.init(fds.child, .{ .codec = opts.codec });
         errdefer ipc_conn.deinit(io);
 
         const thread = try std.Thread.spawn(.{}, ipcThreadMain, .{ctx});
@@ -72,7 +76,7 @@ const AuthState = enum {
 };
 
 const StepState = struct {
-    previous_response_buf: [Ipc.event_buf_size]u8 = undefined,
+    previous_response_buf: [ipc.event_buf_size]u8 = undefined,
     previous_response_len: ?usize = null,
 
     fn previousResponse(self: *const StepState) ?[]const u8 {
@@ -87,9 +91,9 @@ const StepState = struct {
 };
 
 fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
-    var event_buf: [Ipc.event_buf_size]u8 = undefined;
-    var rbuf: [Ipc.event_buf_size]u8 = undefined;
-    var wbuf: [Ipc.event_buf_size]u8 = undefined;
+    var event_buf: [ipc.event_buf_size]u8 = undefined;
+    var rbuf: [ipc.event_buf_size]u8 = undefined;
+    var wbuf: [ipc.event_buf_size]u8 = undefined;
     var authenticated = false;
 
     var reader = ctx.conn.reader(ctx.io, &rbuf);
@@ -155,7 +159,7 @@ fn runAuthSequence(
     }
 
     if (auth_state == .failed or !expected_user_matches) {
-        var failed_result = Ipc.Event{ .pam_auth_result = .{ .ok = false } };
+        var failed_result = ipc.Event{ .pam_auth_result = .{ .ok = false } };
         try sendEvent(ctx, io_writer, &failed_result);
         return .failed;
     }
@@ -172,7 +176,7 @@ fn runAuthSequence(
         return .cancelled;
     }
 
-    var result = Ipc.Event{ .pam_auth_result = .{
+    var result = ipc.Event{ .pam_auth_result = .{
         .ok = post_auth_state == .ok,
     } };
     try sendEvent(ctx, io_writer, &result);
@@ -191,11 +195,11 @@ fn runSteps(
     for (steps) |step| {
         switch (step) {
             .pam_message => |info| {
-                var event = Ipc.Event{ .pam_message = info };
+                var event = ipc.Event{ .pam_message = info };
                 try sendEvent(ctx, io_writer, &event);
             },
             .pam_challenge => |challenge| {
-                var event = Ipc.Event{ .pam_request = challenge.request };
+                var event = ipc.Event{ .pam_request = challenge.request };
                 try sendEvent(ctx, io_writer, &event);
 
                 const response = try ctx.conn.readEvent(io_reader, event_buf);
@@ -261,10 +265,10 @@ fn runSteps(
 fn emitFailureMessages(
     ctx: *Runtime.ServerCtx,
     io_writer: *std.Io.Writer,
-    messages: []const Ipc.PamMessage,
+    messages: []const ipc.PamMessage,
 ) !void {
     for (messages) |message| {
-        var event = Ipc.Event{ .pam_message = message };
+        var event = ipc.Event{ .pam_message = message };
         try sendEvent(ctx, io_writer, &event);
     }
 }
@@ -272,7 +276,7 @@ fn emitFailureMessages(
 fn sendEvent(
     ctx: *Runtime.ServerCtx,
     io_writer: *std.Io.Writer,
-    event: *const Ipc.Event,
+    event: *const ipc.Event,
 ) !void {
     try ctx.conn.writeEvent(io_writer, event);
     try io_writer.flush();

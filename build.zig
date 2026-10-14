@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const ipc_mod = b.createModule(.{
-        .root_source_file = b.path("src/Ipc.zig"),
+        .root_source_file = b.path("src/ipc.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -64,7 +64,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "build_options", .module = build_options_mod },
-            .{ .name = "Ipc", .module = ipc_mod },
+            .{ .name = "ipc", .module = ipc_mod },
             .{ .name = "posix", .module = posix_mod },
             .{ .name = "vt", .module = vt_mod },
         },
@@ -88,7 +88,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "build_options", .module = build_options_mod },
-                .{ .name = "Ipc", .module = ipc_mod },
+                .{ .name = "ipc", .module = ipc_mod },
                 .{ .name = "posix", .module = posix_mod },
                 .{ .name = "vt", .module = vt_mod },
             },

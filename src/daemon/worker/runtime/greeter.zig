@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const env_mod = @import("env.zig");
 const pam_mod = @import("pam");
 const UserInfo = @import("user.zig").UserInfo;
@@ -53,7 +53,7 @@ pub const Greeter = struct {
         self: *Greeter,
         ipc_fd: std.posix.fd_t,
         greeter_cmd: []const u8,
-        session_type: Ipc.SessionType,
+        session_type: ipc.SessionType,
         vt: Vt,
         io: std.Io,
         env_map: *const std.process.Environ.Map,
@@ -93,7 +93,7 @@ pub const Greeter = struct {
 
         try env_mod.applyTermEnv(&envmap, env_map);
 
-        const session_info: Ipc.SessionInfo = .{
+        const session_info: ipc.SessionInfo = .{
             .session_type = session_type,
             .command = .{
                 .session_cmd = greeter_cmd,

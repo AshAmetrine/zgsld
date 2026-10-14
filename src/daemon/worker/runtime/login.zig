@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const posix = @import("posix");
 const pam_mod = @import("pam");
 const pam_conv = @import("pam_conv.zig");
@@ -24,13 +24,13 @@ pub const RunOpts = struct {
     io: std.Io,
     env_map: *const std.process.Environ.Map,
     service_name: []const u8,
-    ipc_conn: *Ipc.Connection,
+    ipc_conn: *ipc.Connection,
     vt: Vt,
 };
 
 const SessionSetup = struct {
     env: std.process.Environ.Map,
-    info: Ipc.SessionInfo,
+    info: ipc.SessionInfo,
 };
 
 pub fn run(opts: RunOpts) !void {
@@ -38,9 +38,9 @@ pub fn run(opts: RunOpts) !void {
     defer if (!ipc_closed) opts.ipc_conn.deinit(opts.io);
 
     var saw_auth = false;
-    var event_buf: [Ipc.event_buf_size]u8 = undefined;
-    var rbuf: [Ipc.event_buf_size]u8 = undefined;
-    var wbuf: [Ipc.event_buf_size]u8 = undefined;
+    var event_buf: [ipc.event_buf_size]u8 = undefined;
+    var rbuf: [ipc.event_buf_size]u8 = undefined;
+    var wbuf: [ipc.event_buf_size]u8 = undefined;
     var reader_impl = opts.ipc_conn.reader(opts.io, &rbuf);
     var writer_impl = opts.ipc_conn.writer(opts.io, &wbuf);
     const ipc_reader = &reader_impl.interface;
@@ -153,9 +153,9 @@ fn writeAuthResult(pam_ctx: *PamCtx, ok: bool) !void {
 
 fn getSession(
     allocator: std.mem.Allocator,
-    ipc_conn: *Ipc.Connection,
+    ipc_conn: *ipc.Connection,
     ipc_reader: *std.Io.Reader,
-    event_buf: *[Ipc.event_buf_size]u8,
+    event_buf: *[ipc.event_buf_size]u8,
 ) !?SessionSetup {
     var session_envmap = std.process.Environ.Map.init(allocator);
     errdefer session_envmap.deinit();
@@ -194,7 +194,7 @@ fn runSession(
     io: std.Io,
     env_map: *const std.process.Environ.Map,
     user_z: [:0]const u8,
-    info: Ipc.SessionInfo,
+    info: ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,

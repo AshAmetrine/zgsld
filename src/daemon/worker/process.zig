@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const posix = @import("posix");
 const build_options = @import("build_options");
 const Config = @import("../../Config.zig");

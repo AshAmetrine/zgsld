@@ -3,11 +3,11 @@ const build_options = @import("build_options");
 const fd_utils = @import("fd.zig");
 const Config = @import("Config.zig");
 const daemon = @import("daemon.zig");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const preview_mod = @import("preview.zig");
 const ProcessContext = @import("ProcessContext.zig");
 
-const IpcConnection = Ipc.Connection;
+const IpcConnection = ipc.Connection;
 const log = std.log.scoped(.zgsld);
 const worker_runtime = daemon.worker.runtime;
 const Self = @This();
@@ -30,6 +30,7 @@ fn appendShellQuotedArg(
 
 vtable: *const VTable,
 process: ProcessContext,
+ipc_codec: *const ipc.Codec = &ipc.Codec.binary,
 
 /// Context passed to `VTable.run`.
 pub const GreeterContext = struct {
@@ -58,6 +59,7 @@ pub const VTable = struct {
 };
 
 pub const Options = struct {
+    ipc_codec: *const ipc.Codec = &ipc.Codec.binary,
     vtable: *const VTable,
     process: ProcessContext,
 };
@@ -66,6 +68,7 @@ pub fn init(opts: Options) Self {
     return .{
         .vtable = opts.vtable,
         .process = opts.process,
+        .ipc_codec = opts.ipc_codec,
     };
 }
 
@@ -85,7 +88,10 @@ pub fn run(self: Self) !void {
     if (sock_fd) |fd| {
         try fd_utils.setCloseOnExec(fd);
 
-        var ipc_conn = IpcConnection.initFromFd(fd);
+        var ipc_conn = IpcConnection.init(.{
+            .handle = fd,
+            .flags = .{ .nonblocking = false },
+        }, .{ .codec = self.ipc_codec });
         defer ipc_conn.deinit(self.process.io);
 
         try self.vtable.run(self.greeterContext(&ipc_conn));
@@ -104,7 +110,10 @@ pub fn run(self: Self) !void {
 /// Runs the greeter against a mock IPC daemon.
 pub fn runPreview(self: Self, opts: preview_mod.api.Options) !void {
     var ctx: preview_mod.Runtime.ServerCtx = undefined;
-    var runtime = try preview_mod.Runtime.init(self.process.io, &ctx, opts);
+    var runtime = try preview_mod.Runtime.init(self.process.io, &ctx, .{
+        .codec = self.ipc_codec,
+        .preview = opts,
+    });
     defer runtime.deinit();
 
     try self.vtable.run(self.greeterContext(&runtime.ipc_conn));
@@ -158,6 +167,7 @@ fn runStandalone(self: Self) !void {
 
     try daemon.session_manager.run(.{
         .allocator = self.process.gpa,
+        .ipc_codec = self.ipc_codec,
         .self_exe_path = self_exe_path_z,
         .config = zgsld_config,
         .io = self.process.io,
@@ -165,9 +175,9 @@ fn runStandalone(self: Self) !void {
     });
 }
 
-fn greeterContext(self: Self, ipc: *IpcConnection) GreeterContext {
+fn greeterContext(self: Self, ipc_conn: *IpcConnection) GreeterContext {
     return .{
-        .ipc = ipc,
+        .ipc = ipc_conn,
         .process = self.process,
     };
 }

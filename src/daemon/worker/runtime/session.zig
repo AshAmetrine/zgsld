@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const posix = @import("posix");
 const tty = @import("tty.zig");
 const env_mod = @import("env.zig");
@@ -20,7 +20,7 @@ const StderrMode = enum {
 };
 
 pub fn resolveSessionVt(
-    session_type: Ipc.SessionType,
+    session_type: ipc.SessionType,
     host_env_map: *const std.process.Environ.Map,
     fallback: Vt,
 ) !Vt {
@@ -44,7 +44,7 @@ pub fn start(
     io: std.Io,
     host_env_map: *const std.process.Environ.Map,
     user: [:0]const u8,
-    info: Ipc.SessionInfo,
+    info: ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
@@ -104,7 +104,7 @@ pub const Session = struct {
     const SpawnOpts = struct {
         io: std.Io,
         host_env_map: *const std.process.Environ.Map,
-        session_info: Ipc.SessionInfo,
+        session_info: ipc.SessionInfo,
         envmap: *std.process.Environ.Map,
         user_info: UserInfo,
         vt: Vt,
@@ -213,7 +213,7 @@ pub const Session = struct {
     const SessionCommandOpts = struct {
         io: std.Io,
         env_map: *const std.process.Environ.Map,
-        cmd: Ipc.SessionCommand,
+        cmd: ipc.SessionCommand,
         user_info: UserInfo,
         home_dir: ?[]const u8,
         environ: [:null]const ?[*:0]const u8,

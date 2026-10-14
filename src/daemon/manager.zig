@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const posix = @import("posix");
 const SocketPair = @import("../SocketPair.zig");
 const worker = @import("worker.zig");
@@ -13,8 +13,8 @@ var shutdown_requested = std.atomic.Value(u8).init(0);
 
 const ForwardIpcCtx = struct {
     io: std.Io,
-    src: *Ipc.Connection,
-    dst: *Ipc.Connection,
+    src: *ipc.Connection,
+    dst: *ipc.Connection,
     err: ?anyerror = null,
 };
 
@@ -26,6 +26,7 @@ const SpawnedWorkers = struct {
 };
 
 pub const SessionManagerRunOpts = struct {
+    ipc_codec: *const ipc.Codec = &ipc.Codec.binary,
     allocator: std.mem.Allocator,
     io: std.Io,
     env_map: *const std.process.Environ.Map,
@@ -78,7 +79,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             std.posix.kill(spawned.session_proc.pid, std.posix.SIG.TERM) catch {};
         }
 
-        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, spawned.greeter_proc);
+        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, spawned.greeter_proc, opts.ipc_codec);
         try waitWorkerAndClearPid(&greeter_worker_pid, spawned.greeter_proc);
         try waitWorkerAndClearPid(&session_worker_pid, spawned.session_proc);
     }
@@ -232,10 +233,11 @@ fn forwardIpc(
     greeter_file: std.Io.File,
     worker_file: std.Io.File,
     greeter_worker_proc: worker.WorkerProcess,
+    ipc_codec: *const ipc.Codec,
 ) !void {
-    var greeter_conn = Ipc.Connection.init(greeter_file);
+    var greeter_conn = ipc.Connection.init(greeter_file, .{ .codec = ipc_codec });
     defer greeter_conn.deinit(io);
-    var worker_conn = Ipc.Connection.init(worker_file);
+    var worker_conn = ipc.Connection.init(worker_file, .{});
     defer worker_conn.deinit(io);
 
     var worker_to_greeter = ForwardIpcCtx{
@@ -247,9 +249,9 @@ fn forwardIpc(
     const worker_to_greeter_thread = try std.Thread.spawn(.{}, forwardIpcThread, .{&worker_to_greeter});
     defer worker_to_greeter_thread.join();
 
-    var event_buf: [Ipc.event_buf_size]u8 = undefined;
-    var rbuf: [Ipc.event_buf_size]u8 = undefined;
-    var wbuf: [Ipc.event_buf_size]u8 = undefined;
+    var event_buf: [ipc.event_buf_size]u8 = undefined;
+    var rbuf: [ipc.event_buf_size]u8 = undefined;
+    var wbuf: [ipc.event_buf_size]u8 = undefined;
 
     var reader = greeter_conn.reader(io, &rbuf);
     var writer = worker_conn.writer(io, &wbuf);
@@ -298,9 +300,9 @@ fn terminateWorkerAndClearPid(pid_slot: *std.atomic.Value(std.posix.pid_t)) void
 }
 
 fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
-    var event_buf: [Ipc.event_buf_size]u8 = undefined;
-    var rbuf: [Ipc.event_buf_size]u8 = undefined;
-    var wbuf: [Ipc.event_buf_size]u8 = undefined;
+    var event_buf: [ipc.event_buf_size]u8 = undefined;
+    var rbuf: [ipc.event_buf_size]u8 = undefined;
+    var wbuf: [ipc.event_buf_size]u8 = undefined;
 
     var reader = ctx.src.reader(ctx.io, &rbuf);
     var writer = ctx.dst.writer(ctx.io, &wbuf);

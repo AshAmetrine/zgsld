@@ -1,4 +1,4 @@
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 
 pub const password_auth_steps = [_]Step{
     .challenge("Password: ", .any, .{}),
@@ -39,15 +39,15 @@ pub const ExpectedResponse = union(enum) {
 
 pub const ChallengeOptions = struct {
     echo: bool = false,
-    on_failure: []const Ipc.PamMessage = &.{},
+    on_failure: []const ipc.PamMessage = &.{},
 };
 
 pub const Step = union(enum) {
-    pam_message: Ipc.PamMessage,
+    pam_message: ipc.PamMessage,
     pam_challenge: struct {
-        request: Ipc.PamConvRequest,
+        request: ipc.PamConvRequest,
         expected_response: ExpectedResponse,
-        on_failure: []const Ipc.PamMessage = &.{},
+        on_failure: []const ipc.PamMessage = &.{},
     },
     retry_block: struct {
         attempts: usize,

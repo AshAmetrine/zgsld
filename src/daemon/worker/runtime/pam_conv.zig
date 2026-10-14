@@ -1,12 +1,12 @@
 const std = @import("std");
 const pam_mod = @import("pam");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 
 const PamMessages = pam_mod.Messages;
 
 pub const PamCtx = struct {
     cancelled: bool,
-    ipc_conn: *Ipc.Connection,
+    ipc_conn: *ipc.Connection,
     reader: *std.Io.Reader,
     writer: *std.Io.Writer,
 };
@@ -21,7 +21,7 @@ pub fn loginConv(
     const ipc_reader = ctx.reader;
     const ipc_writer = ctx.writer;
 
-    var ipc_buf: [Ipc.event_buf_size]u8 = undefined;
+    var ipc_buf: [ipc.event_buf_size]u8 = undefined;
     defer std.crypto.secureZero(u8, &ipc_buf);
 
     var iter = msgs.iter();

@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 const posix = @import("posix");
 const fd_utils = @import("../../fd.zig");
 const autologin = @import("runtime/autologin.zig");
@@ -50,7 +50,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             const sock_fd = try parseZgsldSock(process.environ_map);
             const greeter_cmd = process.environ_map.get("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
             const greeter_session_type_raw = process.environ_map.get("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
-            const greeter_session_type = std.meta.stringToEnum(Ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
+            const greeter_session_type = std.meta.stringToEnum(ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
 
             var greeter = try Greeter.init(process.gpa, .{
                 .service_name = opts.service_name,
@@ -78,7 +78,10 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             const sock_fd = try parseZgsldSock(process.environ_map);
             try fd_utils.setCloseOnExec(sock_fd);
 
-            var ipc_conn = Ipc.Connection.initFromFd(sock_fd);
+            var ipc_conn = ipc.Connection.init(.{
+                .handle = sock_fd,
+                .flags = .{ .nonblocking = false },
+            }, .{});
             try login.run(.{
                 .allocator = process.gpa,
                 .io = process.io,
@@ -91,7 +94,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
         .autologin => {
             const autologin_user = process.environ_map.get("ZGSLD_AUTOLOGIN_USER") orelse return error.MissingAutologinUser;
             const autologin_session_type_raw = process.environ_map.get("ZGSLD_AUTOLOGIN_SESSION_TYPE") orelse return error.MissingAutologinSessionType;
-            const autologin_session_type = std.meta.stringToEnum(Ipc.SessionType, autologin_session_type_raw) orelse return error.InvalidAutologinSessionType;
+            const autologin_session_type = std.meta.stringToEnum(ipc.SessionType, autologin_session_type_raw) orelse return error.InvalidAutologinSessionType;
             const autologin_cmd = process.environ_map.get("ZGSLD_AUTOLOGIN_CMD") orelse return error.MissingAutologinCmd;
             const autologin_user_z = try process.gpa.dupeSentinel(u8, autologin_user, 0);
             defer process.gpa.free(autologin_user_z);

@@ -4,7 +4,7 @@
 //! - `x11` is `void` when built without `-Dx11`.
 
 const build_options = @import("build_options");
-const Ipc = @import("Ipc");
+const ipc = @import("ipc");
 pub const Vt = @import("vt").Vt;
 
 const X11Config = struct {
@@ -23,7 +23,7 @@ const GreeterConfig = struct {
     service_name: []const u8 = build_options.greeter_service_name,
 
     /// Session backend used to run the greeter process.
-    session_type: Ipc.SessionType = .command,
+    session_type: ipc.SessionType = .command,
 
     /// Greeter command for zgsld to run (acts as a wrapper in standalone greeter mode).
     command: ?[:0]const u8 = null,
@@ -39,7 +39,7 @@ const AutologinConfig = struct {
     user: ?[:0]const u8 = null,
 
     /// Session backend used for autologin.
-    session_type: Ipc.SessionType = .command,
+    session_type: ipc.SessionType = .command,
 
     /// Session command with optional args.
     command: ?[:0]const u8 = null,
