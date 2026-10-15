@@ -15,7 +15,7 @@ const ForwardIpcCtx = struct {
     io: std.Io,
     src: *ipc.Connection,
     dst: *ipc.Connection,
-    err: ?anyerror = null,
+    result: anyerror!void = {},
 };
 
 const SpawnedWorkers = struct {
@@ -247,36 +247,38 @@ fn forwardIpc(
     };
 
     const worker_to_greeter_thread = try std.Thread.spawn(.{}, forwardIpcThread, .{&worker_to_greeter});
-    defer worker_to_greeter_thread.join();
-
-    var event_buf: [ipc.event_buf_size]u8 = undefined;
-    var rbuf: [ipc.event_buf_size]u8 = undefined;
-    var wbuf: [ipc.event_buf_size]u8 = undefined;
-
-    var reader = greeter_conn.reader(io, &rbuf);
-    var writer = worker_conn.writer(io, &wbuf);
-    const io_reader = &reader.interface;
-    const io_writer = &writer.interface;
-
-    while (true) {
-        const event = greeter_conn.readEvent(io_reader, &event_buf) catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return err,
-        };
-
-        switch (event) {
-            .start_session => {
-                try waitWorkerAndClearPid(&greeter_worker_pid, greeter_worker_proc);
-            },
-            else => {},
+    {
+        defer {
+            _ = std.c.shutdown(greeter_conn.file.handle, 2);
+            _ = std.c.shutdown(worker_conn.file.handle, 2);
+            worker_to_greeter_thread.join();
         }
 
-        try worker_conn.writeEvent(io_writer, &event);
-        try io_writer.flush();
+        var event_buf: [ipc.event_buf_size]u8 = undefined;
+        var rbuf: [ipc.event_buf_size]u8 = undefined;
+        var wbuf: [ipc.event_buf_size]u8 = undefined;
+
+        var reader = greeter_conn.reader(io, &rbuf);
+        var writer = worker_conn.writer(io, &wbuf);
+        const io_reader = &reader.interface;
+        const io_writer = &writer.interface;
+
+        while (true) {
+            const event = greeter_conn.readEvent(io_reader, &event_buf) catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => return err,
+            };
+
+            if (event == .start_session) {
+                try waitWorkerAndClearPid(&greeter_worker_pid, greeter_worker_proc);
+            }
+
+            try worker_conn.writeEvent(io_writer, &event);
+            try io_writer.flush();
+        }
     }
 
-    _ = std.c.shutdown(worker_conn.file.handle, 2);
-    if (worker_to_greeter.err) |err| return err;
+    return worker_to_greeter.result;
 }
 
 fn waitWorkerAndClearPid(
@@ -300,6 +302,14 @@ fn terminateWorkerAndClearPid(pid_slot: *std.atomic.Value(std.posix.pid_t)) void
 }
 
 fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
+    defer {
+        _ = std.c.shutdown(ctx.src.file.handle, 2);
+        _ = std.c.shutdown(ctx.dst.file.handle, 2);
+    }
+    ctx.result = forwardIpcEvents(ctx);
+}
+
+fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     var rbuf: [ipc.event_buf_size]u8 = undefined;
     var wbuf: [ipc.event_buf_size]u8 = undefined;
@@ -310,25 +320,14 @@ fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
     const io_writer = &writer.interface;
 
     while (true) {
-        const event = ctx.src.readEvent(io_reader, &event_buf) catch |err| {
-            if (err != error.EndOfStream) {
-                ctx.err = err;
-            }
-            break;
+        const event = ctx.src.readEvent(io_reader, &event_buf) catch |err| switch (err) {
+            error.EndOfStream => return,
+            else => return err,
         };
 
-        ctx.dst.writeEvent(io_writer, &event) catch |err| {
-            ctx.err = err;
-            break;
-        };
-        io_writer.flush() catch |err| {
-            ctx.err = err;
-            break;
-        };
+        try ctx.dst.writeEvent(io_writer, &event);
+        try io_writer.flush();
     }
-
-    _ = std.c.shutdown(ctx.src.file.handle, 2);
-    _ = std.c.shutdown(ctx.dst.file.handle, 2);
 }
 
 fn installSignalHandlers() void {
