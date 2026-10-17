@@ -57,7 +57,7 @@ pub const Greeter = struct {
         vt: Vt,
         io: std.Io,
         env_map: *const std.process.Environ.Map,
-    ) !std.posix.pid_t {
+    ) !*std.process.Child {
         const session_vt = try session_mod.resolveSessionVt(session_type, env_map, vt);
         try session_vt.activate(io);
 
@@ -111,11 +111,11 @@ pub const Greeter = struct {
             .stderr = .inherit,
         });
 
-        return self.session.?.pid;
+        return &self.session.?.child;
     }
 
-    pub fn deinit(self: *Greeter) void {
-        if (self.session) |*session| session.deinit();
+    pub fn deinit(self: *Greeter, io: std.Io) void {
+        if (self.session) |*session| session.deinit(io);
         self.pam.deinit();
         self.session = null;
     }

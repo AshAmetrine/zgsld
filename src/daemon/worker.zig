@@ -1,2 +1,2 @@
 pub const runtime = @import("worker/runtime.zig");
-pub const WorkerProcess = @import("worker/process.zig").WorkerProcess;
+pub const process = @import("worker/process.zig");

@@ -1,6 +1,5 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const posix = @import("posix");
 const env_mod = @import("env.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
@@ -58,13 +57,13 @@ pub fn run(opts: RunOpts) !void {
         .user_info = user_info,
         .vt = session_vt,
     });
-    defer session.deinit();
+    defer session.deinit(opts.io);
 
-    signals.setActiveChild(session.pid);
+    signals.setActiveChild(session.child.id.?);
     defer signals.clearActiveChild();
 
     if (signals.shutdownRequested()) {
         signals.forwardShutdownSignal(signals.shutdownSignal());
     }
-    _ = try posix.waitpid(session.pid, 0);
+    _ = try session.child.wait(opts.io);
 }

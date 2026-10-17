@@ -20,7 +20,7 @@ const XServerOpts = struct {
     environ: [:null]const ?[*:0]const u8,
 };
 
-pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.pid_t {
+pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.process.Child {
     var display_buf: [16]u8 = undefined;
     const display_name = try std.fmt.bufPrint(&display_buf, ":{d}", .{opts.display});
 
@@ -72,7 +72,14 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.posix.
         std.process.exit(1);
     }
 
-    return pid;
+    return .{
+        .id = pid,
+        .thread_handle = {},
+        .stdin = null,
+        .stdout = null,
+        .stderr = null,
+        .request_resource_usage_statistics = false,
+    };
 }
 
 pub fn findFreeDisplay(io: std.Io) !u8 {
@@ -121,27 +128,35 @@ fn isXServerListening(io: std.Io, display: u8) bool {
 pub fn waitForXServer(
     io: std.Io,
     display: u8,
-    launcher_pid: std.posix.pid_t,
+    launcher: *std.process.Child,
     timeout_ms: u32,
 ) !std.posix.pid_t {
     var elapsed: u32 = 0;
-    var launcher_exited = false;
     while (elapsed < timeout_ms) : (elapsed += 50) {
         // The lock PID can appear before the socket is actually ready.
         if (readXServerPid(io, display)) |pid| {
             if (isXServerListening(io, display)) return pid;
         }
 
-        if (!launcher_exited) {
+        if (launcher.id) |pid| {
             // The launcher may exit early if the X server daemonizes.
-            const wait_res = try posix.waitpid(launcher_pid, std.posix.W.NOHANG);
-            if (wait_res.pid == launcher_pid) {
-                launcher_exited = true;
+            const wait_res = try posix.waitpid(pid, std.posix.W.NOHANG);
+            if (wait_res.pid == pid) {
+                launcher.id = null;
             }
         }
 
         try io.sleep(.fromMilliseconds(50), .awake);
     }
     // If the launcher exited, treat this as an X server failure instead of a timeout.
-    return if (launcher_exited) error.XServerExited else error.XServerTimeout;
+    return if (launcher.id == null) error.XServerExited else error.XServerTimeout;
+}
+
+pub fn stopXServer(io: std.Io, launcher: *std.process.Child, detached_server_pid: ?std.posix.pid_t) void {
+    if (detached_server_pid) |pid| {
+        if (pid > 0) {
+            std.posix.kill(pid, std.posix.SIG.TERM) catch {};
+        }
+    }
+    launcher.kill(io);
 }

@@ -1,6 +1,5 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const posix = @import("posix");
 const pam_mod = @import("pam");
 const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
@@ -211,14 +210,14 @@ fn runSession(
         defer session_envmap.deinit();
         break :blk try session_mod.start(allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
     };
-    defer session.deinit();
+    defer session.deinit(io);
 
     log.debug("Waiting for session to end...", .{});
-    signals.setActiveChild(session.pid);
+    signals.setActiveChild(session.child.id.?);
     defer signals.clearActiveChild();
 
     if (signals.shutdownRequested()) {
         signals.forwardShutdownSignal(signals.shutdownSignal());
     }
-    _ = try posix.waitpid(session.pid, 0);
+    _ = try session.child.wait(io);
 }

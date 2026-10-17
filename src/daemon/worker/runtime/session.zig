@@ -1,6 +1,5 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const posix = @import("posix");
 const tty = @import("tty.zig");
 const env_mod = @import("env.zig");
 const build_options = @import("build_options");
@@ -64,40 +63,31 @@ pub fn start(
 }
 
 pub const Session = struct {
-    pid: std.posix.pid_t,
+    child: std.process.Child,
 
     x11: if (!build_options.x11_support) void else ?X11Session = if (build_options.x11_support) null else {},
 
     const X11Session = struct {
         const Self = @This();
 
-        launcher_pid: std.posix.pid_t,
-        server_pid: std.posix.pid_t,
+        launcher: std.process.Child,
+        detached_server_pid: ?std.posix.pid_t,
 
-        io: std.Io,
         xauth_path: [:0]const u8,
         allocator: std.mem.Allocator,
 
-        pub fn deinit(self: *Self) void {
-            if (self.server_pid > 0) {
-                std.posix.kill(self.server_pid, std.posix.SIG.TERM) catch {};
-            }
+        pub fn deinit(self: *Self, io: std.Io) void {
+            x11.stopXServer(io, &self.launcher, self.detached_server_pid);
 
-            if (self.server_pid == self.launcher_pid) {
-                // X server is not detached
-                _ = posix.waitpid(self.server_pid, 0) catch {};
-            } else if (self.launcher_pid > 0) {
-                _ = posix.waitpid(self.launcher_pid, std.posix.W.NOHANG) catch {};
-            }
-
-            std.Io.Dir.deleteFileAbsolute(self.io, self.xauth_path) catch {};
+            std.Io.Dir.deleteFileAbsolute(io, self.xauth_path) catch {};
             self.allocator.free(self.xauth_path);
         }
     };
 
-    pub fn deinit(self: *Session) void {
+    pub fn deinit(self: *Session, io: std.Io) void {
+        self.child.kill(io);
         if (build_options.x11_support) {
-            if (self.x11) |*xsession| xsession.deinit();
+            if (self.x11) |*xsession| xsession.deinit(io);
         }
     }
 
@@ -148,7 +138,7 @@ pub const Session = struct {
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
             const setup = x11_setup orelse return error.X11SetupMissing;
             const x_cmd = opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X";
-            const launcher_pid = try x11.startXServer(allocator, .{
+            var launcher = try x11.startXServer(allocator, .{
                 .io = opts.io,
                 .env_map = opts.host_env_map,
                 .x_cmd = x_cmd,
@@ -159,22 +149,15 @@ pub const Session = struct {
                 .environ = session_environ.slice,
             });
 
+            const launcher_pid = launcher.id.?;
             errdefer {
-                if (x11.readXServerPid(opts.io, setup.display)) |pid| {
-                    std.posix.kill(pid, std.posix.SIG.TERM) catch {};
-                    if (pid == launcher_pid) {
-                        _ = posix.waitpid(pid, 0) catch {};
-                    }
-                }
-                if (launcher_pid > 0) {
-                    std.posix.kill(launcher_pid, std.posix.SIG.TERM) catch {};
-                    _ = posix.waitpid(launcher_pid, std.posix.W.NOHANG) catch {};
-                }
+                const server_pid = x11.readXServerPid(opts.io, setup.display);
+                x11.stopXServer(opts.io, &launcher, if (server_pid == launcher_pid) null else server_pid);
             }
 
-            const xserver_pid = try x11.waitForXServer(opts.io, setup.display, launcher_pid, 5000);
+            const xserver_pid = try x11.waitForXServer(opts.io, setup.display, &launcher, 5000);
 
-            const client_pid = try runSessionCommand(allocator, .{
+            const client = try runSessionCommand(allocator, .{
                 .io = opts.io,
                 .env_map = opts.host_env_map,
                 .cmd = opts.session_info.command,
@@ -186,18 +169,17 @@ pub const Session = struct {
             });
 
             return .{
-                .pid = client_pid,
+                .child = client,
                 .x11 = .{
-                    .launcher_pid = launcher_pid,
-                    .server_pid = xserver_pid,
-                    .io = opts.io,
+                    .launcher = launcher,
+                    .detached_server_pid = if (xserver_pid == launcher_pid) null else xserver_pid,
                     .xauth_path = setup.xauth_path,
                     .allocator = allocator,
                 },
             };
         }
 
-        const session_pid = try runSessionCommand(allocator, .{
+        const child = try runSessionCommand(allocator, .{
             .io = opts.io,
             .env_map = opts.host_env_map,
             .cmd = opts.session_info.command,
@@ -207,7 +189,7 @@ pub const Session = struct {
             .vt = session_vt,
             .stderr = opts.stderr,
         });
-        return .{ .pid = session_pid };
+        return .{ .child = child };
     }
 
     const SessionCommandOpts = struct {
@@ -221,7 +203,7 @@ pub const Session = struct {
         stderr: StderrMode,
     };
 
-    fn runSessionCommand(allocator: std.mem.Allocator, opts: SessionCommandOpts) !std.posix.pid_t {
+    fn runSessionCommand(allocator: std.mem.Allocator, opts: SessionCommandOpts) !std.process.Child {
         const prefix = if (opts.cmd.source_profile) blk: {
             break :blk "[ -f /etc/profile ] && . /etc/profile; [ -f $HOME/.profile ] && . $HOME/.profile; exec ";
         } else "exec ";
@@ -244,7 +226,7 @@ fn startCommandSession(
     session_environ: [:null]const ?[*:0]const u8,
     vt: Vt,
     stderr: StderrMode,
-) !std.posix.pid_t {
+) !std.process.Child {
     const session_pid = blk: {
         const child_pid = std.c.fork();
         if (child_pid < 0) return std.posix.unexpectedErrno(std.c.errno(child_pid));
@@ -286,5 +268,12 @@ fn startCommandSession(
         std.process.exit(1);
     }
 
-    return session_pid;
+    return .{
+        .id = session_pid,
+        .thread_handle = {},
+        .stdin = null,
+        .stdout = null,
+        .stderr = null,
+        .request_resource_usage_statistics = false,
+    };
 }

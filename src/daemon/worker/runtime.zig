@@ -1,6 +1,5 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const posix = @import("posix");
 const fd_utils = @import("../../fd.zig");
 const autologin = @import("runtime/autologin.zig");
 const greeter_mod = @import("runtime/greeter.zig");
@@ -59,19 +58,19 @@ pub fn run(process: ProcessContext, opts: Options) !void {
                 .io = process.io,
                 .env_map = process.environ_map,
             });
-            defer greeter.deinit();
+            defer greeter.deinit(process.io);
 
-            const greeter_pid = blk: {
+            const greeter_child = blk: {
                 defer _ = std.c.close(sock_fd);
                 break :blk try greeter.spawn(sock_fd, greeter_cmd, greeter_session_type, vt, process.io, process.environ_map);
             };
-            signals.setActiveChild(greeter_pid);
+            signals.setActiveChild(greeter_child.id.?);
             defer signals.clearActiveChild();
 
             if (signals.shutdownRequested()) {
                 signals.forwardShutdownSignal(signals.shutdownSignal());
             }
-            _ = try posix.waitpid(greeter_pid, 0);
+            _ = try greeter_child.wait(process.io);
             return;
         },
         .user => {
