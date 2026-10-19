@@ -1,5 +1,4 @@
 const std = @import("std");
-const posix = @import("posix");
 const utils = @import("../user.zig");
 const UserInfo = utils.UserInfo;
 const Vt = @import("vt").Vt;
@@ -21,35 +20,31 @@ const XServerOpts = struct {
 };
 
 pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.process.Child {
-    var display_buf: [16]u8 = undefined;
-    const display_name = try std.fmt.bufPrint(&display_buf, ":{d}", .{opts.display});
+    var display_buf: [5]u8 = undefined;
+    const display = try std.fmt.bufPrintSentinel(&display_buf, ":{d}", .{opts.display}, 0);
 
-    var vt_suffix_buf: [8]u8 = undefined;
-    const vt_suffix: []const u8 = if (opts.vt.ttyNumber(opts.io, opts.env_map)) |vt_num|
-        try std.fmt.bufPrint(&vt_suffix_buf, " vt{d}", .{vt_num})
+    var vt_buf: [6]u8 = undefined;
+    const vt: ?[:0]const u8 = if (opts.vt.ttyNumber(opts.io, opts.env_map)) |vt_num|
+        try std.fmt.bufPrintSentinel(&vt_buf, "vt{d}", .{vt_num}, 0)
     else
-        "";
+        null;
 
-    const shell_cmd_z = try std.fmt.allocPrintSentinel(allocator, "exec {s} -auth {s} {s}{s}", .{
-        opts.x_cmd,
-        opts.xauth_path,
-        display_name,
-        vt_suffix,
-    }, 0);
+    const shell_cmd_z = try std.fmt.allocPrintSentinel(allocator, "exec {s} \"$@\"", .{opts.x_cmd}, 0);
     defer allocator.free(shell_cmd_z);
 
     const argv = [_:null]?[*:0]const u8{
         "/bin/sh",
         "-c",
         shell_cmd_z.ptr,
-        null,
+        "zgsld-x11",
+        "-auth",
+        opts.xauth_path.ptr,
+        display.ptr,
+        if (vt) |arg| arg.ptr else null,
     };
 
-    const pid = blk: {
-        const child_pid = std.c.fork();
-        if (child_pid < 0) return std.posix.unexpectedErrno(std.c.errno(child_pid));
-        break :blk child_pid;
-    };
+    const pid = std.c.fork();
+    if (pid < 0) return std.posix.unexpectedErrno(std.c.errno(pid));
     if (pid == 0) {
         {
             var tty_file = opts.vt.openDevice(opts.io, opts.env_map, .read_write) catch |err| {
@@ -72,7 +67,7 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.proces
         std.process.exit(1);
     }
 
-    return .{
+    var server: std.process.Child = .{
         .id = pid,
         .thread_handle = {},
         .stdin = null,
@@ -80,83 +75,68 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.proces
         .stderr = null,
         .request_resource_usage_statistics = false,
     };
+    errdefer server.kill(opts.io);
+
+    try waitForXServer(opts.io, opts.display, &server, 5000);
+    return server;
 }
 
 pub fn findFreeDisplay(io: std.Io) !u8 {
-    var display: u8 = 0;
-    while (display < 200) : (display += 1) {
+    for (0..200) |display| {
         var lock_buf: [15]u8 = undefined;
         const lock_path = try std.fmt.bufPrint(&lock_buf, "/tmp/.X{d}-lock", .{display});
         std.Io.Dir.accessAbsolute(io, lock_path, .{}) catch |err| switch (err) {
-            error.FileNotFound => break,
+            error.FileNotFound => return @intCast(display),
             error.AccessDenied, error.PermissionDenied => {},
             else => return err,
         };
     }
 
-    if (display >= 200) return error.NoAvailableDisplay;
-    return display;
+    return error.NoAvailableDisplay;
 }
 
-// When X server detaches, we can get the PID from the lock file
-pub fn readXServerPid(io: std.Io, display: u8) ?std.posix.pid_t {
-    var lock_buf: [15]u8 = undefined;
-    const lock_path = std.fmt.bufPrint(&lock_buf, "/tmp/.X{d}-lock", .{display}) catch return null;
-    const lock_file = std.Io.Dir.openFileAbsolute(io, lock_path, .{ .mode = .read_only }) catch return null;
-    defer lock_file.close(io);
-
-    var rbuf: [32]u8 = undefined;
-    var reader = lock_file.reader(io, &rbuf);
-
-    var buf: [32]u8 = undefined;
-    const n = reader.interface.readSliceShort(&buf) catch return null;
-    if (n == 0) return null;
-    const pid_str = std.mem.trim(u8, buf[0..n], " \r\n\t");
-    if (pid_str.len == 0) return null;
-    return std.fmt.parseInt(std.posix.pid_t, pid_str, 10) catch return null;
-}
-
-fn isXServerListening(io: std.Io, display: u8) bool {
-    var path_buf: [64]u8 = undefined;
-    const socket_path = std.fmt.bufPrint(&path_buf, "/tmp/.X11-unix/X{d}", .{display}) catch return false;
-    const address = std.Io.net.UnixAddress.init(socket_path) catch return false;
+fn isXServerListening(io: std.Io, address: std.Io.net.UnixAddress) bool {
     const stream = address.connect(io) catch return false;
     defer stream.close(io);
     return true;
 }
 
-pub fn waitForXServer(
+fn waitForXServer(
     io: std.Io,
     display: u8,
-    launcher: *std.process.Child,
+    server: *std.process.Child,
     timeout_ms: u32,
-) !std.posix.pid_t {
-    var elapsed: u32 = 0;
-    while (elapsed < timeout_ms) : (elapsed += 50) {
-        // The lock PID can appear before the socket is actually ready.
-        if (readXServerPid(io, display)) |pid| {
-            if (isXServerListening(io, display)) return pid;
+) !void {
+    var path_buf: [64]u8 = undefined;
+    const socket_path = try std.fmt.bufPrint(&path_buf, "/tmp/.X11-unix/X{d}", .{display});
+    const address = try std.Io.net.UnixAddress.init(socket_path);
+
+    const deadline = std.Io.Clock.awake.now(io).addDuration(.fromMilliseconds(timeout_ms));
+    while (std.Io.Clock.awake.now(io).compare(.lt, deadline)) {
+        const pid = server.id orelse return error.XServerExited;
+        if (hasExited(pid)) {
+            server.id = null;
+            return error.XServerExited;
         }
 
-        if (launcher.id) |pid| {
-            // The launcher may exit early if the X server daemonizes.
-            const wait_res = try posix.waitpid(pid, std.posix.W.NOHANG);
-            if (wait_res.pid == pid) {
-                launcher.id = null;
-            }
-        }
+        if (isXServerListening(io, address)) return;
 
-        try io.sleep(.fromMilliseconds(50), .awake);
+        const next_poll = std.Io.Clock.awake.now(io).addDuration(.fromMilliseconds(50));
+        const wake_at = if (next_poll.compare(.lt, deadline)) next_poll else deadline;
+        try wake_at.withClock(.awake).wait(io);
     }
-    // If the launcher exited, treat this as an X server failure instead of a timeout.
-    return if (launcher.id == null) error.XServerExited else error.XServerTimeout;
+    return error.XServerTimeout;
 }
 
-pub fn stopXServer(io: std.Io, launcher: *std.process.Child, detached_server_pid: ?std.posix.pid_t) void {
-    if (detached_server_pid) |pid| {
-        if (pid > 0) {
-            std.posix.kill(pid, std.posix.SIG.TERM) catch {};
+fn hasExited(pid: std.posix.pid_t) bool {
+    while (true) {
+        const rc = std.c.waitpid(pid, null, std.posix.W.NOHANG);
+        switch (std.c.errno(rc)) {
+            .SUCCESS => return rc == pid,
+            .INTR => continue,
+            .CHILD => unreachable,
+            .INVAL => unreachable,
+            else => unreachable,
         }
     }
-    launcher.kill(io);
 }

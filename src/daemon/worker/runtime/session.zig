@@ -70,14 +70,13 @@ pub const Session = struct {
     const X11Session = struct {
         const Self = @This();
 
-        launcher: std.process.Child,
-        detached_server_pid: ?std.posix.pid_t,
+        server: std.process.Child,
 
         xauth_path: [:0]const u8,
         allocator: std.mem.Allocator,
 
         pub fn deinit(self: *Self, io: std.Io) void {
-            x11.stopXServer(io, &self.launcher, self.detached_server_pid);
+            self.server.kill(io);
 
             std.Io.Dir.deleteFileAbsolute(io, self.xauth_path) catch {};
             self.allocator.free(self.xauth_path);
@@ -122,7 +121,11 @@ pub const Session = struct {
             var xauth_buf: [std.fs.max_path_bytes]u8 = undefined;
             const runtime_dir = opts.envmap.get("XDG_RUNTIME_DIR");
             const xauth_path = try x11.xauth.createXauthEntry(opts.io, &xauth_buf, display_env[1..], opts.user_info.uid, opts.user_info.gid, runtime_dir);
+            errdefer std.Io.Dir.deleteFileAbsolute(opts.io, xauth_path) catch {};
+
             const xauth_path_z = try allocator.dupeSentinel(u8, xauth_path, 0);
+            errdefer allocator.free(xauth_path_z);
+
             try opts.envmap.put("XAUTHORITY", xauth_path_z);
 
             x11_setup = .{
@@ -138,7 +141,7 @@ pub const Session = struct {
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
             const setup = x11_setup orelse return error.X11SetupMissing;
             const x_cmd = opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X";
-            var launcher = try x11.startXServer(allocator, .{
+            var server = try x11.startXServer(allocator, .{
                 .io = opts.io,
                 .env_map = opts.host_env_map,
                 .x_cmd = x_cmd,
@@ -149,13 +152,7 @@ pub const Session = struct {
                 .environ = session_environ.slice,
             });
 
-            const launcher_pid = launcher.id.?;
-            errdefer {
-                const server_pid = x11.readXServerPid(opts.io, setup.display);
-                x11.stopXServer(opts.io, &launcher, if (server_pid == launcher_pid) null else server_pid);
-            }
-
-            const xserver_pid = try x11.waitForXServer(opts.io, setup.display, &launcher, 5000);
+            errdefer server.kill(opts.io);
 
             const client = try runSessionCommand(allocator, .{
                 .io = opts.io,
@@ -171,8 +168,7 @@ pub const Session = struct {
             return .{
                 .child = client,
                 .x11 = .{
-                    .launcher = launcher,
-                    .detached_server_pid = if (xserver_pid == launcher_pid) null else xserver_pid,
+                    .server = server,
                     .xauth_path = setup.xauth_path,
                     .allocator = allocator,
                 },

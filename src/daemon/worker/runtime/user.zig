@@ -36,11 +36,13 @@ pub fn ensureOwnedDirAt(
     var dir = try parent.openDir(io, name, .{ .follow_symlinks = false, .iterate = true });
     errdefer dir.close(io);
 
-    const owner = try getOwner(dir);
     if (created) {
         try dir.setOwner(io, uid, gid);
-    } else if (owner.uid != uid or owner.gid != gid) {
-        return error.UnsafePathOwnership;
+    } else {
+        const owner = try getOwner(dir);
+        if (owner.uid != uid or owner.gid != gid) {
+            return error.UnsafePathOwnership;
+        }
     }
     try dir.setPermissions(io, permissions);
     return dir;

@@ -52,12 +52,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const posix_mod = b.createModule(.{
-        .root_source_file = b.path("src/posix.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const zgsld_mod = b.addModule("zgsld", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -65,7 +59,6 @@ pub fn build(b: *std.Build) !void {
         .imports = &.{
             .{ .name = "build_options", .module = build_options_mod },
             .{ .name = "ipc", .module = ipc_mod },
-            .{ .name = "posix", .module = posix_mod },
             .{ .name = "vt", .module = vt_mod },
         },
     });
@@ -89,7 +82,6 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "build_options", .module = build_options_mod },
                 .{ .name = "ipc", .module = ipc_mod },
-                .{ .name = "posix", .module = posix_mod },
                 .{ .name = "vt", .module = vt_mod },
             },
         }),

@@ -1,5 +1,4 @@
 const std = @import("std");
-const Md5 = std.crypto.hash.Md5;
 const utils = @import("../user.zig");
 
 const Family = enum(u16) {
@@ -16,17 +15,10 @@ const Xauth = struct {
     pub fn writeAll(self: Xauth, writer: *std.Io.Writer) !void {
         try writer.writeInt(u16, @backingInt(self.family), .big);
 
-        try writer.writeInt(u16, @intCast(self.address.len), .big);
-        try writer.writeAll(self.address);
-
-        try writer.writeInt(u16, @intCast(self.display_number.len), .big);
-        try writer.writeAll(self.display_number);
-
-        try writer.writeInt(u16, @intCast(self.name.len), .big);
-        try writer.writeAll(self.name);
-
-        try writer.writeInt(u16, @intCast(self.data.len), .big);
-        try writer.writeAll(self.data);
+        for ([_][]const u8{ self.address, self.display_number, self.name, self.data }) |field| {
+            try writer.writeInt(u16, @intCast(field.len), .big);
+            try writer.writeAll(field);
+        }
     }
 };
 
@@ -35,14 +27,10 @@ const XauthRootDir = struct {
     dir: std.Io.Dir,
 };
 
-fn mcookie(io: std.Io) ![Md5.digest_length]u8 {
-    var buf: [4096]u8 = undefined;
-    try io.randomSecure(&buf);
-
-    var out: [Md5.digest_length]u8 = undefined;
-    Md5.hash(&buf, &out, .{});
-
-    return out;
+fn mcookie(io: std.Io) ![16]u8 {
+    var cookie: [16]u8 = undefined;
+    try io.randomSecure(&cookie);
+    return cookie;
 }
 
 pub fn createXauthEntry(
@@ -136,8 +124,7 @@ fn createUniqueXauthFile(
     var xauth_dir = try resolveXauthDir(io, uid, gid, &base_buf, runtime_dir);
     defer xauth_dir.dir.close(io);
 
-    var attempts: usize = 0;
-    while (attempts < 16) : (attempts += 1) {
+    for (0..16) |_| {
         var raw: [3]u8 = undefined;
         try io.randomSecure(&raw);
         const id = std.fmt.bytesToHex(&raw, .lower);
