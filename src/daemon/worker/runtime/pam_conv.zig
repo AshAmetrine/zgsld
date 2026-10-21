@@ -1,8 +1,6 @@
 const std = @import("std");
-const pam_mod = @import("pam");
+const PamMessages = @import("pam").Messages;
 const ipc = @import("ipc");
-
-const PamMessages = pam_mod.Messages;
 
 pub const PamCtx = struct {
     cancelled: bool,

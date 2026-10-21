@@ -1,12 +1,11 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const pam_mod = @import("pam");
+const Pam = @import("pam").Pam;
 const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
 const Vt = @import("vt").Vt;
 
-const Pam = pam_mod.Pam;
 const PamCtx = pam_conv.PamCtx;
 
 const log = std.log.scoped(.zgsld_worker);
@@ -82,9 +81,8 @@ pub fn run(opts: RunOpts) !void {
                 defer pam.deinit();
 
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                if (try opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf)) |tty_path| {
-                    try pam.setItem(.{ .tty = tty_path });
-                }
+                const tty_path = try opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
+                try pam.setItem(.{ .tty = tty_path });
 
                 if (!(try authenticate(&pam, &pam_ctx))) continue;
 
@@ -113,27 +111,25 @@ fn authenticate(
         try writeAuthResult(pam_ctx, false);
         return false;
     };
-    pam.accountMgmt(.{}) catch |err| {
-        switch (err) {
-            error.NewAuthTokenRequired => {
-                log.debug("Pam auth token update required", .{});
-                pam.changeAuthToken(.{ .change_expired_authtok = true }) catch |change_err| {
-                    if (pam_ctx.cancelled) {
-                        log.debug("Pam auth token update cancelled", .{});
-                        return false;
-                    }
-
-                    log.debug("Pam auth token update failed: {s}", .{@errorName(change_err)});
-                    try writeAuthResult(pam_ctx, false);
+    pam.accountMgmt(.{}) catch |err| switch (err) {
+        error.NewAuthTokenRequired => {
+            log.debug("Pam auth token update required", .{});
+            pam.changeAuthToken(.{ .change_expired_authtok = true }) catch |change_err| {
+                if (pam_ctx.cancelled) {
+                    log.debug("Pam auth token update cancelled", .{});
                     return false;
-                };
-            },
-            else => {
-                log.debug("Pam account management failed: {s}", .{@errorName(err)});
+                }
+
+                log.debug("Pam auth token update failed: {s}", .{@errorName(change_err)});
                 try writeAuthResult(pam_ctx, false);
                 return false;
-            },
-        }
+            };
+        },
+        else => {
+            log.debug("Pam account management failed: {s}", .{@errorName(err)});
+            try writeAuthResult(pam_ctx, false);
+            return false;
+        },
     };
     pam.setCred(.{ .action = .establish }) catch |err| {
         log.debug("Pam credential establishment failed: {s}", .{@errorName(err)});
@@ -185,7 +181,6 @@ fn getSession(
             else => return error.UnexpectedEvent,
         }
     }
-    return null;
 }
 
 fn runSession(
@@ -200,24 +195,15 @@ fn runSession(
 ) !void {
     log.debug("Starting session...", .{});
     const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
-    try session_vt.activate(io);
-
-    var tty_file = try session_vt.openDevice(io, env_map, .read_write);
+    var tty_file = try session_vt.openSessionTty(io, env_map);
     defer if (tty_file.handle > 2) tty_file.close(io);
-    try session_vt.establishSessionControllingTty(tty_file.handle);
 
     var session = blk: {
         defer session_envmap.deinit();
-        break :blk try session_mod.start(allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
+        break :blk try session_mod.start(PamCtx, allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
     };
     defer session.deinit(io);
 
     log.debug("Waiting for session to end...", .{});
-    signals.setActiveChild(session.child.id.?);
-    defer signals.clearActiveChild();
-
-    if (signals.shutdownRequested()) {
-        signals.forwardShutdownSignal(signals.shutdownSignal());
-    }
-    _ = try session.child.wait(io);
+    try signals.waitForChild(io, &session.child);
 }

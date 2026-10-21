@@ -32,19 +32,21 @@ pub fn shutdownRequested() bool {
     return shutdown_signal.load(.seq_cst) != 0;
 }
 
-pub fn shutdownSignal() std.posix.SIG {
+pub fn waitForChild(io: std.Io, child: *std.process.Child) !void {
+    active_child_pid.store(child.id.?, .seq_cst);
+    defer active_child_pid.store(0, .seq_cst);
+
+    if (shutdownRequested()) {
+        forwardShutdownSignal(shutdownSignal());
+    }
+    _ = try child.wait(io);
+}
+
+fn shutdownSignal() std.posix.SIG {
     return @fromBackingInt(@intCast(shutdown_signal.load(.seq_cst)));
 }
 
-pub fn setActiveChild(pid: std.posix.pid_t) void {
-    active_child_pid.store(pid, .seq_cst);
-}
-
-pub fn clearActiveChild() void {
-    active_child_pid.store(0, .seq_cst);
-}
-
-pub fn forwardShutdownSignal(sig: std.posix.SIG) void {
+fn forwardShutdownSignal(sig: std.posix.SIG) void {
     const child_pid = active_child_pid.load(.seq_cst);
     if (child_pid > 0) {
         std.posix.kill(child_pid, sig) catch {};

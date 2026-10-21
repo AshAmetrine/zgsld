@@ -12,16 +12,26 @@ pub fn applyPamUserSessionEnv(
     host_env_map: *const std.process.Environ.Map,
     vt: Vt,
 ) !void {
-    if (session_envmap.get("XDG_CURRENT_DESKTOP")) |v| {
-        try pam.putEnvAlloc("XDG_CURRENT_DESKTOP", v);
-    }
-    if (session_envmap.get("XDG_SESSION_DESKTOP")) |v| {
-        try pam.putEnvAlloc("XDG_SESSION_DESKTOP", v);
-    }
-    if (session_envmap.get("XDG_SESSION_TYPE")) |v| {
-        try pam.putEnvAlloc("XDG_SESSION_TYPE", v);
+    for ([_][]const u8{ "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "XDG_SESSION_TYPE" }) |key| {
+        if (session_envmap.get(key)) |value| {
+            try pam.putEnvAlloc(key, value);
+        }
     }
 
+    try openPamSession(T, pam, io, host_env_map, vt, .user);
+
+    // Add pam env list to the envmap (overwrites)
+    try pam.addEnvListToMap(session_envmap);
+}
+
+pub fn openPamSession(
+    comptime T: type,
+    pam: *Pam(T),
+    io: std.Io,
+    host_env_map: *const std.process.Environ.Map,
+    vt: Vt,
+    comptime session_class: enum { greeter, user },
+) !void {
     if (vt.ttyNumber(io, host_env_map)) |vt_num| {
         var vt_buf: [3]u8 = undefined;
         const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
@@ -34,11 +44,8 @@ pub fn applyPamUserSessionEnv(
         try pam.putEnv("XDG_SEAT=seat0");
     }
 
-    try pam.putEnv("XDG_SESSION_CLASS=user");
+    try pam.putEnv("XDG_SESSION_CLASS=" ++ @tagName(session_class));
     try pam.openSession(.{});
-
-    // Add pam env list to the envmap (overwrites)
-    try pam.addEnvListToMap(session_envmap);
 }
 
 pub fn applyUserEnv(session_envmap: *std.process.Environ.Map, user: [:0]const u8) !UserInfo {
@@ -66,14 +73,10 @@ pub fn applyUserEnv(session_envmap: *std.process.Environ.Map, user: [:0]const u8
 pub fn applyTermEnv(session_envmap: *std.process.Environ.Map, host_env_map: *const std.process.Environ.Map) !void {
     if (session_envmap.get("TERM") != null) return;
 
-    if (host_env_map.get("TERM")) |term| {
-        try session_envmap.put("TERM", term);
-        return;
-    }
-
-    switch (builtin.os.tag) {
-        .linux => try session_envmap.put("TERM", "linux"),
-        .freebsd => try session_envmap.put("TERM", "xterm"),
-        else => {},
-    }
+    const term = host_env_map.get("TERM") orelse switch (builtin.os.tag) {
+        .linux => "linux",
+        .freebsd => "xterm",
+        else => return,
+    };
+    try session_envmap.put("TERM", term);
 }

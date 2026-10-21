@@ -77,8 +77,8 @@ pub const Vt = union(enum) {
 
     pub fn openDevice(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = (try self.resolveTtyDevicePath(io, env_map, &path_buf)) orelse return error.InvalidTtyPath;
-        return try std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = mode });
+        const tty_path = try self.resolveTtyDevicePath(io, env_map, &path_buf);
+        return std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = mode });
     }
 
     pub fn resolveTtyDevicePath(
@@ -86,7 +86,7 @@ pub const Vt = union(enum) {
         io: std.Io,
         env_map: *const std.process.Environ.Map,
         buf: *[std.fs.max_path_bytes]u8,
-    ) !?[:0]const u8 {
+    ) ![:0]const u8 {
         switch (self) {
             .number => |vt_num| {
                 if (getTtyDevicePath(buf, vt_num)) |tty_path| {
@@ -125,28 +125,22 @@ pub const Vt = union(enum) {
     }
 
     pub fn normalize(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !void {
-        switch (self) {
-            .number => {
-                try self.activate(io);
-                try self.setTextMode(io, env_map);
-                self.resetTermios(io, env_map);
-            },
-            .current => {
-                try self.setTextMode(io, env_map);
-                self.resetTermios(io, env_map);
-            },
-            .unmanaged => {
-                self.resetTermios(io, env_map);
-            },
-        }
+        try self.activate(io);
+        if (self != .unmanaged) try self.setTextMode(io, env_map);
+        self.resetTermios(io, env_map);
     }
 
-    pub fn establishSessionControllingTty(self: Vt, fd: std.posix.fd_t) !void {
-        _ = self;
+    pub fn openSessionTty(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !std.Io.File {
+        try self.activate(io);
 
-        if (controllingTtyIsCurrentSession(fd)) return;
-        try becomeSessionLeader();
-        try attachControllingTty(fd);
+        var tty_file = try self.openDevice(io, env_map, .read_write);
+        errdefer if (tty_file.handle > 2) tty_file.close(io);
+
+        if (!controllingTtyIsCurrentSession(tty_file.handle)) {
+            try becomeSessionLeader();
+            try attachControllingTty(tty_file.handle);
+        }
+        return tty_file;
     }
 
     pub fn watchInput(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !InputWatcher {
@@ -164,14 +158,10 @@ pub const Vt = union(enum) {
     }
 
     fn resetTermios(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) void {
-        var tty_file = self.open(io, env_map, .read_write) catch {
-            return;
-        };
+        var tty_file = self.open(io, env_map, .read_write) catch return;
         defer if (tty_file.handle > 2) tty_file.close(io);
 
-        var termios = std.posix.tcgetattr(tty_file.handle) catch {
-            return;
-        };
+        var termios = std.posix.tcgetattr(tty_file.handle) catch return;
         termios.lflag.ISIG = true;
         termios.lflag.ICANON = true;
         termios.lflag.ECHO = true;
@@ -231,7 +221,7 @@ fn getInheritedTtyDevicePath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     for (inherited_fds) |fd| {
         const tty_path = ttyPathFromFd(fd, buf) catch continue;
         if (std.mem.eql(u8, tty_path, "/dev/tty")) continue;
-        return buf[0..tty_path.len :0];
+        return tty_path;
     }
 
     return error.NoInheritedTty;
@@ -343,8 +333,7 @@ fn controllingTtyIsCurrentSession(fd: std.posix.fd_t) bool {
 
 fn becomeSessionLeader() !void {
     switch (std.c.errno(std.c.setsid())) {
-        .SUCCESS => {},
-        .PERM => {},
+        .SUCCESS, .PERM => {},
         else => |err| return std.posix.unexpectedErrno(err),
     }
 }

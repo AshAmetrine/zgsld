@@ -5,9 +5,7 @@ const env_mod = @import("env.zig");
 const build_options = @import("build_options");
 const x11 = if (build_options.x11_support) @import("session/x11.zig");
 const utils = @import("user.zig");
-const pam_mod = @import("pam");
-const PamCtx = @import("pam_conv.zig").PamCtx;
-const Pam = pam_mod.Pam;
+const Pam = @import("pam").Pam;
 const UserInfo = utils.UserInfo;
 const Vt = @import("vt").Vt;
 
@@ -39,17 +37,17 @@ const X11Setup = struct {
 };
 
 pub fn start(
+    comptime T: type,
     allocator: std.mem.Allocator,
     io: std.Io,
     host_env_map: *const std.process.Environ.Map,
     user: [:0]const u8,
     info: ipc.SessionInfo,
-    pam: *Pam(PamCtx),
+    pam: *Pam(T),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
 ) !Session {
-    const session_vt = try resolveSessionVt(info.session_type, host_env_map, vt);
-    try env_mod.applyPamUserSessionEnv(PamCtx, pam, session_envmap, io, host_env_map, session_vt);
+    try env_mod.applyPamUserSessionEnv(T, pam, session_envmap, io, host_env_map, vt);
     try env_mod.applyTermEnv(session_envmap, host_env_map);
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
@@ -58,14 +56,14 @@ pub fn start(
         .session_info = info,
         .envmap = session_envmap,
         .user_info = user_info,
-        .vt = session_vt,
+        .vt = vt,
     });
 }
 
 pub const Session = struct {
     child: std.process.Child,
 
-    x11: if (!build_options.x11_support) void else ?X11Session = if (build_options.x11_support) null else {},
+    x11: if (build_options.x11_support) ?X11Session else void = if (build_options.x11_support) null else {},
 
     const X11Session = struct {
         const Self = @This();
@@ -104,8 +102,6 @@ pub const Session = struct {
         if (!build_options.x11_support and opts.session_info.session_type == .x11) {
             return error.X11UnsupportedBuild;
         }
-        const session_vt = try resolveSessionVt(opts.session_info.session_type, opts.host_env_map, opts.vt);
-
         var x11_setup: ?X11Setup = null;
         errdefer if (x11_setup) |setup| {
             std.Io.Dir.deleteFileAbsolute(opts.io, setup.xauth_path) catch {};
@@ -138,41 +134,27 @@ pub const Session = struct {
         defer arena.deinit();
         const session_environ = try opts.envmap.createPosixBlock(arena.allocator(), .{});
 
-        if (build_options.x11_support and opts.session_info.session_type == .x11) {
-            const setup = x11_setup orelse return error.X11SetupMissing;
-            const x_cmd = opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X";
-            var server = try x11.startXServer(allocator, .{
-                .io = opts.io,
-                .env_map = opts.host_env_map,
-                .x_cmd = x_cmd,
-                .xauth_path = setup.xauth_path,
-                .display = setup.display,
-                .vt = session_vt,
-                .user = opts.user_info,
-                .environ = session_environ.slice,
-            });
+        var x11_session: ?X11Session = null;
+        errdefer if (x11_session) |*session| session.server.kill(opts.io);
 
-            errdefer server.kill(opts.io);
-
-            const client = try runSessionCommand(allocator, .{
-                .io = opts.io,
-                .env_map = opts.host_env_map,
-                .cmd = opts.session_info.command,
-                .environ = session_environ.slice,
-                .user_info = opts.user_info,
-                .home_dir = opts.envmap.get("HOME"),
-                .vt = session_vt,
-                .stderr = opts.stderr,
-            });
-
-            return .{
-                .child = client,
-                .x11 = .{
-                    .server = server,
+        if (build_options.x11_support) {
+            if (x11_setup) |setup| {
+                const x_cmd = opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X";
+                x11_session = .{
+                    .server = try x11.startXServer(allocator, .{
+                        .io = opts.io,
+                        .env_map = opts.host_env_map,
+                        .x_cmd = x_cmd,
+                        .xauth_path = setup.xauth_path,
+                        .display = setup.display,
+                        .vt = opts.vt,
+                        .user = opts.user_info,
+                        .environ = session_environ.slice,
+                    }),
                     .xauth_path = setup.xauth_path,
                     .allocator = allocator,
-                },
-            };
+                };
+            }
         }
 
         const child = try runSessionCommand(allocator, .{
@@ -182,10 +164,13 @@ pub const Session = struct {
             .environ = session_environ.slice,
             .user_info = opts.user_info,
             .home_dir = opts.envmap.get("HOME"),
-            .vt = session_vt,
+            .vt = opts.vt,
             .stderr = opts.stderr,
         });
-        return .{ .child = child };
+        return .{
+            .child = child,
+            .x11 = if (build_options.x11_support) x11_session else {},
+        };
     }
 
     const SessionCommandOpts = struct {
@@ -200,76 +185,57 @@ pub const Session = struct {
     };
 
     fn runSessionCommand(allocator: std.mem.Allocator, opts: SessionCommandOpts) !std.process.Child {
-        const prefix = if (opts.cmd.source_profile) blk: {
-            break :blk "[ -f /etc/profile ] && . /etc/profile; [ -f $HOME/.profile ] && . $HOME/.profile; exec ";
-        } else "exec ";
+        const prefix = if (opts.cmd.source_profile)
+            "[ -f /etc/profile ] && . /etc/profile; [ -f $HOME/.profile ] && . $HOME/.profile; exec "
+        else
+            "exec ";
 
         const shell_cmd = try std.mem.concatWithSentinel(allocator, u8, &.{ prefix, opts.cmd.session_cmd }, 0);
         defer allocator.free(shell_cmd);
 
-        const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr, null };
+        const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr };
 
-        return try startCommandSession(opts.io, opts.env_map, opts.user_info, opts.home_dir, &wrapper, opts.environ, opts.vt, opts.stderr);
-    }
-};
+        const session_pid = std.c.fork();
+        if (session_pid < 0) return std.posix.unexpectedErrno(std.c.errno(session_pid));
+        if (session_pid == 0) {
+            {
+                opts.vt.activate(opts.io) catch |err| {
+                    log.err("Failed to activate session tty: {s}", .{@errorName(err)});
+                    std.process.exit(1);
+                };
 
-fn startCommandSession(
-    io: std.Io,
-    env_map: *const std.process.Environ.Map,
-    user_info: UserInfo,
-    home_dir: ?[]const u8,
-    argv: [:null]const ?[*:0]const u8,
-    session_environ: [:null]const ?[*:0]const u8,
-    vt: Vt,
-    stderr: StderrMode,
-) !std.process.Child {
-    const session_pid = blk: {
-        const child_pid = std.c.fork();
-        if (child_pid < 0) return std.posix.unexpectedErrno(std.c.errno(child_pid));
-        break :blk child_pid;
-    };
-    if (session_pid == 0) {
-        {
-            vt.activate(io) catch |err| {
-                log.err("Failed to activate session tty: {s}", .{@errorName(err)});
-                std.process.exit(1);
-            };
+                var tty_file = opts.vt.openDevice(opts.io, opts.env_map, .read_write) catch |err| {
+                    log.err("Failed to open session tty device: {s}", .{@errorName(err)});
+                    std.process.exit(1);
+                };
+                defer if (tty_file.handle > 2) tty_file.close(opts.io);
 
-            var tty_file = vt.openDevice(io, env_map, .read_write) catch |err| {
-                log.err("Failed to open session tty device: {s}", .{@errorName(err)});
-                std.process.exit(1);
-            };
-            defer if (tty_file.handle > 2) tty_file.close(io);
+                (switch (opts.stderr) {
+                    .inherit => tty.redirectStdinAndStdoutToTty(tty_file.handle),
+                    .tty => tty.redirectStdioToTty(tty_file.handle),
+                }) catch |err| {
+                    log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
+                    std.process.exit(1);
+                };
+            }
 
-            (switch (stderr) {
-                .inherit => tty.redirectStdinAndStdoutToTty(tty_file.handle),
-                .tty => tty.redirectStdioToTty(tty_file.handle),
-            }) catch |err| {
-                log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
-                std.process.exit(1);
-            };
-        }
-
-        utils.dropPrivileges(user_info) catch std.process.exit(1);
-        if (home_dir) |dir| {
+            utils.dropPrivileges(opts.user_info) catch std.process.exit(1);
+            const dir = opts.home_dir orelse "/";
             var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
             const dir_z = std.fmt.bufPrintSentinel(&dir_buf, "{s}", .{dir}, 0) catch std.process.exit(1);
             if (std.c.chdir(dir_z) != 0) std.process.exit(1);
-        } else {
-            if (std.c.chdir("/") != 0) std.process.exit(1);
+
+            _ = std.c.execve("/bin/sh", &wrapper, opts.environ.ptr);
+            std.process.exit(1);
         }
 
-        const cmd_path = argv[0] orelse std.process.exit(1);
-        _ = std.c.execve(cmd_path, argv.ptr, session_environ.ptr);
-        std.process.exit(1);
+        return .{
+            .id = session_pid,
+            .thread_handle = {},
+            .stdin = null,
+            .stdout = null,
+            .stderr = null,
+            .request_resource_usage_statistics = false,
+        };
     }
-
-    return .{
-        .id = session_pid,
-        .thread_handle = {},
-        .stdin = null,
-        .stdout = null,
-        .stderr = null,
-        .request_resource_usage_statistics = false,
-    };
-}
+};

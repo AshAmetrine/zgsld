@@ -26,7 +26,7 @@ const GreeterConfig = struct {
     session_type: ipc.SessionType = .command,
 
     /// Greeter command for zgsld to run (acts as a wrapper in standalone greeter mode).
-    command: ?[:0]const u8 = null,
+    command: ?[]const u8 = null,
 };
 
 const SessionConfig = struct {
@@ -36,13 +36,13 @@ const SessionConfig = struct {
 
 const AutologinConfig = struct {
     /// User account to autologin. Unset/empty disables autologin.
-    user: ?[:0]const u8 = null,
+    user: ?[]const u8 = null,
 
     /// Session backend used for autologin.
     session_type: ipc.SessionType = .command,
 
     /// Session command with optional args.
-    command: ?[:0]const u8 = null,
+    command: ?[]const u8 = null,
 
     /// Delay before launching autologin. 0 for immediate start.
     timeout_seconds: u64 = 0,

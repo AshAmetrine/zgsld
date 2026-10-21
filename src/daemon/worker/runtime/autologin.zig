@@ -1,12 +1,9 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const env_mod = @import("env.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
-const pam_mod = @import("pam");
+const Pam = @import("pam").Pam;
 const Vt = @import("vt").Vt;
-
-const Pam = pam_mod.Pam;
 
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
@@ -29,9 +26,8 @@ pub fn run(opts: RunOpts) !void {
     const session_vt = try session_mod.resolveSessionVt(opts.info.session_type, opts.env_map, opts.vt);
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    if (try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf)) |tty_path| {
-        try pam.setItem(.{ .tty = tty_path });
-    }
+    const tty_path = try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
+    try pam.setItem(.{ .tty = tty_path });
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 
@@ -40,30 +36,11 @@ pub fn run(opts: RunOpts) !void {
     if (opts.info.session_type == .x11) {
         try session_envmap.put("XDG_SESSION_TYPE", "x11");
     }
-    try session_vt.activate(opts.io);
-
-    var tty_file = try session_vt.openDevice(opts.io, opts.env_map, .read_write);
+    var tty_file = try session_vt.openSessionTty(opts.io, opts.env_map);
     defer if (tty_file.handle > 2) tty_file.close(opts.io);
-    try session_vt.establishSessionControllingTty(tty_file.handle);
 
-    try env_mod.applyPamUserSessionEnv(void, &pam, &session_envmap, opts.io, opts.env_map, session_vt);
-    try env_mod.applyTermEnv(&session_envmap, opts.env_map);
-    const user_info = try env_mod.applyUserEnv(&session_envmap, opts.user);
-    var session = try session_mod.Session.spawn(opts.allocator, .{
-        .io = opts.io,
-        .host_env_map = opts.env_map,
-        .session_info = opts.info,
-        .envmap = &session_envmap,
-        .user_info = user_info,
-        .vt = session_vt,
-    });
+    var session = try session_mod.start(void, opts.allocator, opts.io, opts.env_map, opts.user, opts.info, &pam, &session_envmap, session_vt);
     defer session.deinit(opts.io);
 
-    signals.setActiveChild(session.child.id.?);
-    defer signals.clearActiveChild();
-
-    if (signals.shutdownRequested()) {
-        signals.forwardShutdownSignal(signals.shutdownSignal());
-    }
-    _ = try session.child.wait(opts.io);
+    try signals.waitForChild(opts.io, &session.child);
 }
