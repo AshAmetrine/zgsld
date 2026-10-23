@@ -4,7 +4,6 @@ const SocketPair = @import("SocketPair.zig");
 pub const api = @import("preview/api.zig");
 
 pub const Runtime = struct {
-    io: std.Io,
     ipc_conn: ipc.Connection,
     thread: ?std.Thread,
     ctx: *Runtime.ServerCtx,
@@ -18,17 +17,17 @@ pub const Runtime = struct {
         io: std.Io,
         conn: ipc.Connection,
         opts: api.Options,
-        err: ?anyerror,
+        result: anyerror!void,
     };
 
     pub fn init(io: std.Io, ctx: *Runtime.ServerCtx, opts: Options) !Runtime {
-        const fds = try SocketPair.init(io);
+        const fds = try SocketPair.init();
 
         ctx.* = .{
             .io = io,
             .conn = ipc.Connection.init(fds.parent, .{ .codec = opts.codec }),
             .opts = opts.preview,
-            .err = null,
+            .result = {},
         };
         errdefer ctx.conn.deinit(io);
 
@@ -38,7 +37,6 @@ pub const Runtime = struct {
         const thread = try std.Thread.spawn(.{}, ipcThreadMain, .{ctx});
 
         return .{
-            .io = io,
             .ipc_conn = ipc_conn,
             .thread = thread,
             .ctx = ctx,
@@ -46,15 +44,13 @@ pub const Runtime = struct {
     }
 
     pub fn closeAndJoin(self: *Runtime) !void {
-        if (self.thread == null) return;
-
-        const thread = self.thread.?;
+        const thread = self.thread orelse return;
         self.thread = null;
 
-        self.ipc_conn.deinit(self.io);
+        self.ipc_conn.deinit(self.ctx.io);
         thread.join();
 
-        if (self.ctx.err) |err| return err;
+        return self.ctx.result;
     }
 
     pub fn deinit(self: *Runtime) void {
@@ -64,9 +60,7 @@ pub const Runtime = struct {
 
 fn ipcThreadMain(ctx: *Runtime.ServerCtx) void {
     defer ctx.conn.deinit(ctx.io);
-    runMockIpc(ctx) catch |err| {
-        ctx.err = err;
-    };
+    ctx.result = runMockIpc(ctx);
 }
 
 const AuthState = enum {
@@ -116,10 +110,7 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
                     return error.UnexpectedPreviewEvent;
                 }
                 const state = try runAuthSequence(ctx, auth.user, io_reader, io_writer, &event_buf);
-                authenticated = switch (state) {
-                    .ok => true,
-                    .failed, .cancelled => false,
-                };
+                authenticated = state == .ok;
             },
             .set_session_env => {
                 if (!authenticated) return error.UnexpectedPreviewEvent;
@@ -159,8 +150,7 @@ fn runAuthSequence(
     }
 
     if (auth_state == .failed or !expected_user_matches) {
-        var failed_result = ipc.Event{ .pam_auth_result = .{ .ok = false } };
-        try sendEvent(ctx, io_writer, &failed_result);
+        try sendEvent(ctx, io_writer, &.{ .pam_auth_result = .{ .ok = false } });
         return .failed;
     }
 
@@ -176,10 +166,7 @@ fn runAuthSequence(
         return .cancelled;
     }
 
-    var result = ipc.Event{ .pam_auth_result = .{
-        .ok = post_auth_state == .ok,
-    } };
-    try sendEvent(ctx, io_writer, &result);
+    try sendEvent(ctx, io_writer, &.{ .pam_auth_result = .{ .ok = post_auth_state == .ok } });
 
     return post_auth_state;
 }
@@ -195,12 +182,10 @@ fn runSteps(
     for (steps) |step| {
         switch (step) {
             .pam_message => |info| {
-                var event = ipc.Event{ .pam_message = info };
-                try sendEvent(ctx, io_writer, &event);
+                try sendEvent(ctx, io_writer, &.{ .pam_message = info });
             },
             .pam_challenge => |challenge| {
-                var event = ipc.Event{ .pam_request = challenge.request };
-                try sendEvent(ctx, io_writer, &event);
+                try sendEvent(ctx, io_writer, &.{ .pam_request = challenge.request });
 
                 const response = try ctx.conn.readEvent(io_reader, event_buf);
                 switch (response) {
@@ -231,8 +216,7 @@ fn runSteps(
                     return error.InvalidPreviewConfiguration;
                 }
 
-                var attempt: usize = 0;
-                while (attempt < retry.attempts) : (attempt += 1) {
+                for (0..retry.attempts) |attempt| {
                     var attempt_state = step_state.*;
                     const retry_result = try runSteps(
                         ctx,
@@ -268,8 +252,7 @@ fn emitFailureMessages(
     messages: []const ipc.PamMessage,
 ) !void {
     for (messages) |message| {
-        var event = ipc.Event{ .pam_message = message };
-        try sendEvent(ctx, io_writer, &event);
+        try sendEvent(ctx, io_writer, &.{ .pam_message = message });
     }
 }
 
