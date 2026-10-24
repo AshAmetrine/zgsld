@@ -80,12 +80,8 @@ pub fn run(self: Self) !void {
         }
     }
 
-    var sock_fd: ?std.posix.fd_t = null;
     if (self.process.environ_map.get("ZGSLD_SOCK")) |sock| {
-        sock_fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
-    }
-
-    if (sock_fd) |fd| {
+        const fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
         try fd_utils.setCloseOnExec(fd);
 
         var ipc_conn = IpcConnection.init(.{
@@ -129,7 +125,11 @@ fn runStandalone(self: Self) !void {
     defer configure_arena.deinit();
 
     if (self.vtable.configure) |configure| {
-        try configure(self.configureContext(configure_arena.allocator(), &zgsld_config));
+        try configure(.{
+            .arena_allocator = configure_arena.allocator(),
+            .config = &zgsld_config,
+            .process = self.process,
+        });
     }
 
     var cmd_buf: std.ArrayList(u8) = .empty;
@@ -142,12 +142,11 @@ fn runStandalone(self: Self) !void {
         }
     }
 
-    var self_exe_path_buf: [std.Io.Dir.max_path_bytes + 1]u8 = undefined;
+    var self_exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const self_exe_path_len = try std.process.executablePath(self.process.io, &self_exe_path_buf);
-    self_exe_path_buf[self_exe_path_len] = 0;
-    const self_exe_path_z = self_exe_path_buf[0..self_exe_path_len :0];
+    const self_exe_path = self_exe_path_buf[0..self_exe_path_len];
 
-    try appendShellQuotedArg(&cmd_buf, self.process.gpa, self_exe_path_z);
+    try appendShellQuotedArg(&cmd_buf, self.process.gpa, self_exe_path);
 
     var args_iter = self.process.args.iterate();
     _ = args_iter.skip();
@@ -156,11 +155,10 @@ fn runStandalone(self: Self) !void {
         try appendShellQuotedArg(&cmd_buf, self.process.gpa, arg);
     }
 
-    const greeter_cmd = try cmd_buf.toOwnedSliceSentinel(self.process.gpa, 0);
-    zgsld_config.greeter.command = greeter_cmd;
+    zgsld_config.greeter.command = cmd_buf.items;
 
-    log.debug("Greeter Cmd: {s}", .{greeter_cmd});
-    log.debug("Greeter Path: {s}", .{self_exe_path_z});
+    log.debug("Greeter Cmd: {s}", .{cmd_buf.items});
+    log.debug("Greeter Path: {s}", .{self_exe_path});
     log.debug("Greeter User: {s}", .{zgsld_config.greeter.user});
     log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
     log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
@@ -168,7 +166,7 @@ fn runStandalone(self: Self) !void {
     try daemon.session_manager.run(.{
         .allocator = self.process.gpa,
         .ipc_codec = self.ipc_codec,
-        .self_exe_path = self_exe_path_z,
+        .self_exe_path = self_exe_path,
         .config = zgsld_config,
         .io = self.process.io,
         .env_map = self.process.environ_map,
@@ -178,18 +176,6 @@ fn runStandalone(self: Self) !void {
 fn greeterContext(self: Self, ipc_conn: *IpcConnection) GreeterContext {
     return .{
         .ipc = ipc_conn,
-        .process = self.process,
-    };
-}
-
-fn configureContext(
-    self: Self,
-    arena_allocator: std.mem.Allocator,
-    config: *Config,
-) ConfigureContext {
-    return .{
-        .arena_allocator = arena_allocator,
-        .config = config,
         .process = self.process,
     };
 }

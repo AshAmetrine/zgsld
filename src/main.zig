@@ -66,17 +66,15 @@ pub fn main(init: std.process.Init) !void {
 
     if (res.args.vt) |vt| config.vt = try Config.Vt.parse(vt);
 
-    var self_exe_path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    var self_exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const self_exe_path_len = try std.process.executablePath(init.io, &self_exe_path_buf);
     const self_exe_path = self_exe_path_buf[0..self_exe_path_len];
-    self_exe_path_buf[self_exe_path.len] = 0;
-    const self_exe_path_z = self_exe_path_buf[0..self_exe_path.len :0];
 
     try daemon.session_manager.run(.{
         .allocator = allocator,
         .io = init.io,
         .env_map = init.environ_map,
-        .self_exe_path = self_exe_path_z,
+        .self_exe_path = self_exe_path,
         .config = config,
     });
 }

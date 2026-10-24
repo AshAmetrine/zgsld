@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const is_top_level = b.pkg_hash.len == 0;
-    const standalone = b.option(bool, "standalone", "Build standalone greeter + session manager") orelse if (is_top_level) false else true;
+    const standalone = b.option(bool, "standalone", "Build standalone greeter + session manager") orelse !is_top_level;
     if (is_top_level and standalone) {
         std.log.warn("zgsld: ignoring -Dstandalone=true for top-level builds (library-only option)", .{});
     }
@@ -150,7 +150,7 @@ fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) 
         2 => {
             // Untagged development build (e.g. 0.10.0-dev.2025+ecf0050a9).
             var it = std.mem.splitScalar(u8, git_describe, '-');
-            const tagged_ancestor = std.mem.trimStart(u8, it.first(), "v");
+            const tagged_ancestor = it.first();
             const commit_height = it.next().?;
             const commit_id = it.next().?;
 
@@ -161,7 +161,7 @@ fn getVersionStr(b: *std.Build, name: []const u8, version: std.SemanticVersion) 
             }
 
             // Check that the commit hash is prefixed with a 'g' (a Git convention).
-            if (commit_id.len < 1 or commit_id[0] != 'g') {
+            if (commit_id.len == 0 or commit_id[0] != 'g') {
                 std.debug.print("Unexpected `git describe` output: {s}\n", .{git_describe});
                 return version_str;
             }
