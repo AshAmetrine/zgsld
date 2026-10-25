@@ -17,7 +17,7 @@ const native = builtin.target.cpu.arch.endian();
 fn readHeader(io_reader: *std.Io.Reader) !struct { tag: EventType, payload_len: usize } {
     const tag_num = try io_reader.takeByte();
     const payload_len_u32 = try io_reader.takeInt(u32, native);
-    const tag: EventType = @fromBackingInt(@intCast(tag_num));
+    const tag = std.enums.fromInt(EventType, tag_num) orelse return error.InvalidEventTag;
     return .{
         .tag = tag,
         .payload_len = @intCast(payload_len_u32),
@@ -78,7 +78,7 @@ pub fn readEvent(_: *const Codec, io_reader: *std.Io.Reader, event_buf: []u8) !E
         },
         .start_session => blk: {
             if (payload_len < 3) return error.InvalidPayload;
-            const session_type: SessionType = @fromBackingInt(@intCast(payload[0]));
+            const session_type = std.enums.fromInt(SessionType, payload[0]) orelse return error.InvalidPayload;
             break :blk .{
                 .start_session = .{
                     .session_type = session_type,
