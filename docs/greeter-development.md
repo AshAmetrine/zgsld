@@ -1,6 +1,8 @@
 # Greeter Development
 
-If you would like complete greeter implementations to use as reference, check the [Greeters](greeters.md) section.
+You can use the ZGSLD library to build a greeter that handles user interaction, while ZGSLD manages authentication and launching sessions.
+
+For complete implementations, see [Greeters](greeters.md).
 
 ## Add The Dependency
 
@@ -27,25 +29,21 @@ exe.root_module.addImport("zgsld", zgsld.module("zgsld"));
 
 ## Build Options
 
-- `standalone`
-When this is `true`, your greeter will not depend on the `zgsld` binary and will have all `zgsld` functionality built-in to the built executable.
+### `standalone`
 
-`standalone` defaults to `true`.
+Whether to embed the daemon in your greeter. Defaults to `true`, producing a standalone executable.
 
-- `x11`
+Set this to `false` to use a separate `zgsld` daemon, allowing users to switch greeters while keeping the same daemon setup.
+
+### `x11`
+
 Whether standalone builds should support starting the X server. This is a no-op when `.standalone = false`.
-
-## Standalone Greeters
-
-Standalone greeter support lets a greeter embed `zgsld` functionality without requiring the `zgsld` executable to be installed separately.
-
-This is useful when the greeter wants to own the complete entrypoint while still relying on `zgsld` for authentication and session-launch behaviour.
 
 ## API
 
 For the full API reference, see the [generated Zig docs](../zig/).
 
-### Zgsld.init
+### `Zgsld.init`
 
 In your `main()` function, you will want to `init` the `Zgsld` struct and then call the `run` function:
 
@@ -59,7 +57,7 @@ const app = Zgsld.init(.{
 });
 ```
 
-#### .run
+#### `.run`
 
 Function Signature: `fn run(ctx: Zgsld.GreeterContext) !void`
 
@@ -67,17 +65,14 @@ The `run` function is the main entrypoint to your greeter. This will be called i
 
 You most likely want to parse any args your greeter needs here, then run your greeter code.
 
-#### .configure
+
+#### `.configure`
 
 Function Signature: `fn configure(ctx: Zgsld.ConfigureContext) !void`
 
 `configure` is for standalone builds to have control over `zgsld` configuration options. It is never called in greeter-only (non-standalone) builds. 
 
-### Runtime Behaviour
-
-After `const app = Zgsld.init(...)`, you can now call `app.run()`.
-
-`app.run()` behaves differently depending on how the greeter was built.
+### `Zgsld.run`
 
 #### Greeter only builds
 
@@ -88,6 +83,7 @@ When the greeter is launched by `zgsld`, `app.run()` uses the IPC connection pas
 When a standalone greeter executable is launched directly, `app.run()` starts the embedded zgsld runtime.
 
 This launches the manager and the worker processes needed to: 
+
 - run the greeter
 - handle PAM authentication
 - start the user session
@@ -99,18 +95,9 @@ It also ensures the greeter process has exited before the session worker receive
 
 ### Logging
 
-You can forward logs from a greeter to the same place as ZGSLD for consolidation of logs.
+Greeter stderr is inherited from ZGSLD, so you can use `std.log` or write to stderr directly.
 
-First, you will need to set the log function in `std_options` in your `main.zig` file:
-
-```zig
-const zgsld = @import("zgsld");
-pub const std_options: std.Options = .{ .logFn = zgsld.logFn };
-```
-
-Then in `main()`, you can call `zgsld.initZgsldLog(init.environ_map)`. 
-
-ZGSLD passes `ZGSLD_LOG` (ZGSLD's log file descriptor) through to the greeter, and `initZgsldLog` fetches this environment variable and stores it for usage by `zgsld.logFn`.
+Terminal greeters should write their UI to stdout.
 
 ### Previews
 
@@ -119,9 +106,12 @@ You can even define your own dummy PAM flows and test your greeter against them.
 
 This also allows users to view configuration changes they make in the greeter's config if your greeter supports a way for a user to customise the theme.
 
+Previews also support and can be useful for testing [custom IPC codecs](#ipc-codecs).
+
 #### Example
 
-This is a small snippet from a project which runs a preview based on build options.
+To run a preview, call `app.runPreview()` instead of `app.run()`.
+The following snippet is from a project which runs a preview based on build options:
 
 ```zig
 pub fn main(init: std.process.Init) !void {
@@ -142,4 +132,69 @@ pub fn main(init: std.process.Init) !void {
         try app.run();
     }
 }
+```
+
+### IPC codecs
+
+Inter-process communication (IPC) is used between the greeter and zgsld to authenticate users and request a session to launch.
+
+This library supports replacing the default IPC codec by implementing `readEvent` and `writeEvent`, which convert between bytes and `zgsld.ipc.Event`.
+
+If you are building your greeter without the daemon built-in, then your codec must match whichever daemon runs it. The standard `zgsld` executable uses the built-in binary codec. 
+
+#### Example
+
+In the following example, `readEvent` and `writeEvent` delegate to the built-in binary codec. For a custom codec, replace them with your own decoding/encoding implementations.
+
+```zig
+const std = @import("std");
+const zgsld = @import("zgsld");
+const ipc = zgsld.ipc;
+
+const my_codec: ipc.Codec = .{
+    .vtable = &.{
+        .readEvent = readEvent,
+        .writeEvent = writeEvent,
+    },
+};
+
+fn readEvent(
+    _: *const ipc.Codec,
+    reader: *std.Io.Reader,
+    event_buf: []u8,
+) !ipc.Event {
+    return ipc.Codec.binary.readEvent(reader, event_buf);
+}
+
+fn writeEvent(
+    _: *const ipc.Codec,
+    writer: *std.Io.Writer,
+    event: *const ipc.Event,
+) !void {
+    try ipc.Codec.binary.writeEvent(writer, event);
+}
+```
+
+You can pass your custom codec to `Zgsld.init`:
+
+```zig
+const app = zgsld.Zgsld.init(.{
+    .process = .fromInit(init),
+    .ipc_codec = &my_codec,
+    .vtable = &.{
+        .run = run,
+        .configure = configure,
+    },
+});
+
+try app.run();
+```
+
+[Previews](#previews) use the codec supplied to `Zgsld.init`, so you can test your custom codec alongside your greeter by calling `app.runPreview()` instead of `app.run()`:
+
+```zig
+try app.runPreview(.{
+    .authenticate_steps = &zgsld.preview.password_auth_steps,
+    .post_auth_steps = &zgsld.preview.change_auth_token_steps,
+});
 ```
