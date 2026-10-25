@@ -1,3 +1,7 @@
+---
+slug: /
+---
+
 # Getting Started
 
 ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greeters, handling PAM authentication through IPC, and launching a session.
@@ -79,8 +83,8 @@ sudo cp zig-out/bin/zgsld /usr/local/bin/zgsld
 
 #### Create The Greeter User
 
-- **Linux:** `#!sh sudo useradd -M greeter`
-- **FreeBSD:** `#!sh sudo pw useradd greeter -d /nonexistent -s /usr/sbin/nologin`
+- **Linux:** `sudo useradd -M greeter`
+- **FreeBSD:** `sudo pw useradd greeter -d /nonexistent -s /usr/sbin/nologin`
 
 #### Install Example Configuration And PAM Files
 

@@ -3,4 +3,6 @@ zig-out
 result
 zig-pkg
 /.direnv/
-/site/
+/docs/build/
+/docs/node_modules/
+/docs/.docusaurus/

@@ -41,7 +41,7 @@ Whether standalone builds should support starting the X server. This is a no-op 
 
 ## API
 
-For the full API reference, see the [generated Zig docs](../zig/).
+For the full API reference, see the [generated Zig docs](pathname:///zgsld/zig/).
 
 ### `Zgsld.init`
 

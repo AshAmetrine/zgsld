@@ -119,8 +119,7 @@
             name = "zgsld-devshell";
             nativeBuildInputs = with pkgs; [
               linux-pam
-              mkdocs
-              python3Packages.mkdocs-material
+              nodejs_22
             ];
           };
         }
