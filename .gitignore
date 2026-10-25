@@ -3,3 +3,4 @@ zig-out
 result
 zig-pkg
 /.direnv/
+/site/

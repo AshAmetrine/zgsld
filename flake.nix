@@ -4,8 +4,8 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    zig-overlay = {
-      url = "github:mitchellh/zig-overlay";
+    zig2nix = {
+      url = "github:Cloudef/zig2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -24,26 +24,43 @@
     {
       self,
       nixpkgs,
-      zig-overlay,
+      zig2nix,
       zls-flake,
       treefmt-nix,
       ...
     }:
     let
       inherit (nixpkgs) lib;
-      forAllSystems = lib.genAttrs lib.systems.flakeExposed;
+      forAllSystems = lib.genAttrs (builtins.attrNames zig2nix.packages);
+      zigEnv =
+        system:
+        zig2nix.outputs.zig-env.${system} {
+          inherit nixpkgs;
+          zig = zig2nix.packages.${system}.zig-0_17_0;
+          zls = zls-flake.packages.${system}.zls;
+        };
       zgsldOverlay = final: _prev: {
-        zgsld = final.callPackage ./nix/package.nix { };
+        zgsld = final.callPackage ./nix/package.nix {
+          zigPackage = (zigEnv final.stdenv.hostPlatform.system).package;
+        };
       };
       zigDevOverlay =
         final: prev:
         let
-          system = prev.stdenv.hostPlatform.system;
+          env = zigEnv prev.stdenv.hostPlatform.system;
         in
         {
-          zls = zls-flake.packages.${system}.zls;
-          zig = zig-overlay.packages.${system}."0.17.0";
+          inherit (env) zig zls;
         };
+      treefmtFor =
+        system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ zigDevOverlay ];
+          };
+        in
+        treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix;
     in
     {
       overlays.default = zgsldOverlay;
@@ -83,16 +100,11 @@
         }
       );
 
-      formatter = forAllSystems (
-        system:
-        let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ zigDevOverlay ];
-          };
-        in
-        (treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix).config.build.wrapper
-      );
+      formatter = forAllSystems (system: (treefmtFor system).config.build.wrapper);
+
+      checks = forAllSystems (system: {
+        formatting = (treefmtFor system).config.build.check self;
+      });
 
       devShells = forAllSystems (
         system:
@@ -103,15 +115,12 @@
           };
         in
         {
-          default = pkgs.mkShell {
+          default = (zigEnv system).mkShell {
             name = "zgsld-devshell";
-            packages = with pkgs; [
-              zig
-              zls
+            nativeBuildInputs = with pkgs; [
               linux-pam
               mkdocs
               python3Packages.mkdocs-material
-              zon2nix
             ];
           };
         }

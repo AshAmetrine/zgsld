@@ -1,0 +1,32 @@
+{
+  "clap-0.12.0-oBajB4XpAQCF1WRKnD5KOKPsnwwT_NNdAJ7Ww3irYJac": {
+    "name": "clap",
+    "url": "git+https://github.com/Hejsil/zig-clap#05faf3905e8548f5cc269a8836e154065e70128d",
+    "hash": "sha256-eSVoB23aJtVzauqSRqHwoaqL7/N253r9rrumqPqIuIo="
+  },
+  "zigini-0.6.0-BSkB7UtYAADFPMY2JFpY0cb2ozdua0J4nARLZguCzrA8": {
+    "name": "zigini",
+    "url": "git+https://github.com/ashametrine/zigini#9d0a918c4d2f55bac05ddc9524fcaed7c2279d6c",
+    "hash": "sha256-LFVBew3BHF2SGahWNmYOqk2h/2EWmi9QKo5ghlyVGWA="
+  },
+  "ini-0.1.0-YCQ9YnsrAAAxl1kQHi95ths2vSkdPIJxzUg6e2Oo83w_": {
+    "name": "ini",
+    "url": "git+https://github.com/ziglibs/ini#10cfba648f709588ab2f8785f56641024c510df9",
+    "hash": "sha256-TtnGZjqT6ulpI6osAJ/LcAcC4brajEK3UqUuGcsacrI="
+  },
+  "zig_pam-0.2.0--cHVhiJbAADmwXTlw4tcdJLwmJlRW3Ejv1R1w_wpeGWt": {
+    "name": "zig_pam",
+    "url": "git+https://github.com/ashametrine/zig-pam#621ab029084f0401d06caa57928fecb378720cc1",
+    "hash": "sha256-oU1YnT1oWXjbS81pqniWkvlg4aSZhT6HFvCBsaNiSx4="
+  },
+  "translate_c-2.0.1-Q_BUWmpOBwCIhy--up1q6cl3OlIQE86iJU8R-bZ01aPj": {
+    "name": "translate_c",
+    "url": "git+https://codeberg.org/ziglang/translate-c?ref=2.0.1#4f5ad374e50d1a98d3da79fa5d3bda9949103bf7",
+    "hash": "sha256-rTVWaa8N/sIQaSKfY1f7UqYDzSL9HFsjIBr8ho2hYos="
+  },
+  "aro-0.0.0-JSD1QqKGNwALqBes402gHE7CP3Ga6xHS1J4mjThB3ro4": {
+    "name": "aro",
+    "url": "git+https://codeberg.org/ziglang/arocc?ref=zig-0.17.x#ffddc972f7a208bd6e254c27465407270fd8b60c",
+    "hash": "sha256-JLgx0heTDZvOhnFQV8bMCO3gJBB2e7dlnEfstd2M99c="
+  }
+}

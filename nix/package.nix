@@ -1,32 +1,30 @@
 {
   lib,
   stdenv,
-  callPackage,
-  zig,
+  zigPackage,
+  autoPatchelfHook,
   linux-pam,
+  versionCheckHook,
   x11Support ? true,
 }:
 
-stdenv.mkDerivation (finalAttrs: {
+zigPackage {
   pname = "zgsld";
   version = "0.1.0";
 
   src = lib.cleanSource ../.;
-  deps = callPackage ./build.zig.zon.nix { };
-
-  nativeBuildInputs = [
-    zig.hook
-  ];
-
+  nativeBuildInputs = [ autoPatchelfHook ];
   buildInputs = [
     linux-pam
   ];
 
   zigBuildFlags = [
-    "--system"
-    "${finalAttrs.deps}"
+    "--release=safe"
   ]
   ++ lib.optional x11Support "-Dx11";
+
+  nativeInstallCheckInputs = [ versionCheckHook ];
+  doInstallCheck = stdenv.buildPlatform.canExecute stdenv.hostPlatform;
 
   meta = {
     description = "Zig Greeter and Session Launcher Daemon";
@@ -39,4 +37,4 @@ stdenv.mkDerivation (finalAttrs: {
   passthru = {
     inherit x11Support;
   };
-})
+}
