@@ -71,6 +71,17 @@ pub const PamAuthResult = struct {
     ok: bool,
 };
 
+pub const ErrorInfo = struct {
+    code: Code,
+    message: []const u8 = "",
+
+    pub const max_message_len = event_buf_size - 2;
+    pub const Code = enum {
+        invalid_request,
+        internal_error,
+    };
+};
+
 pub const Event = union(enum) {
     pam_start_auth: struct {
         user: [:0]const u8,
@@ -82,6 +93,7 @@ pub const Event = union(enum) {
     login_cancel: void,
     start_session: SessionInfo,
     set_session_env: SessionEnvVar,
+    err: ErrorInfo,
 };
 
 pub const Codec = struct {

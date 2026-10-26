@@ -3,7 +3,8 @@ const PamMessages = @import("pam").Messages;
 const ipc = @import("ipc");
 
 pub const PamCtx = struct {
-    cancelled: bool,
+    cancelled: bool = false,
+    conv_error: ?anyerror = null,
     ipc_conn: *ipc.Connection,
     reader: *std.Io.Reader,
     writer: *std.Io.Writer,
@@ -15,7 +16,14 @@ pub fn loginConv(
     ctx: *PamCtx,
 ) !void {
     if (ctx.cancelled) return error.Abort;
+    if (ctx.conv_error) |err| return err;
+    runConversation(msgs, ctx) catch |err| {
+        if (!ctx.cancelled) ctx.conv_error = err;
+        return err;
+    };
+}
 
+fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
     const ipc_reader = ctx.reader;
     const ipc_writer = ctx.writer;
 

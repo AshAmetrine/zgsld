@@ -71,6 +71,11 @@ pub fn readEvent(_: ?*anyopaque, io_reader: *std.Io.Reader, event_buf: []u8) !Ev
             };
         },
         .pam_response => .{ .pam_response = payload },
+        .err => blk: {
+            if (payload_len < 1 or payload_len > ipc.ErrorInfo.max_message_len + 1) return error.InvalidPayload;
+            const code = std.enums.fromInt(ipc.ErrorInfo.Code, payload[0]) orelse return error.InvalidPayload;
+            break :blk .{ .err = .{ .code = code, .message = payload[1..] } };
+        },
         .pam_auth_result => blk: {
             if (payload_len != 1) return error.InvalidPayload;
             break :blk .{ .pam_auth_result = .{ .ok = payload[0] != 0 } };
@@ -153,6 +158,12 @@ pub fn writeEvent(_: ?*anyopaque, io_writer: *std.Io.Writer, event: *const Event
             try io_writer.writeAll(env.key);
             try io_writer.writeByte('=');
             try io_writer.writeAll(env.value);
+        },
+        .err => |failure| {
+            if (failure.message.len > ipc.ErrorInfo.max_message_len) return error.InvalidPayload;
+            try writeHeader(io_writer, .err, @intCast(failure.message.len + 1));
+            try io_writer.writeByte(@backingInt(failure.code));
+            try io_writer.writeAll(failure.message);
         },
     }
 }

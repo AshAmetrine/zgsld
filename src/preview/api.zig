@@ -43,6 +43,7 @@ pub const ChallengeOptions = struct {
 };
 
 pub const Step = union(enum) {
+    internal_error: void,
     pam_message: ipc.PamMessage,
     pam_challenge: struct {
         request: ipc.PamConvRequest,

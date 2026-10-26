@@ -1,6 +1,7 @@
 const std = @import("std");
 const ipc = @import("ipc");
 const Pam = @import("pam").Pam;
+const PamError = @import("pam").PamError;
 const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
@@ -60,34 +61,72 @@ pub fn run(opts: RunOpts) !void {
             },
             .pam_start_auth => |auth| {
                 saw_auth = true;
-                const user_z = try opts.allocator.dupeSentinel(u8, auth.user, 0);
-                defer opts.allocator.free(user_z);
-
                 var pam_ctx: PamCtx = .{
-                    .cancelled = false,
                     .ipc_conn = opts.ipc_conn,
                     .reader = ipc_reader,
                     .writer = ipc_writer,
                 };
 
-                var pam = try Pam(PamCtx).init(opts.allocator, .{
+                const user_z = opts.allocator.dupeSentinel(u8, auth.user, 0) catch |err| {
+                    try reportInternalError(&pam_ctx, err);
+                    continue;
+                };
+                defer opts.allocator.free(user_z);
+
+                var pam = Pam(PamCtx).init(opts.allocator, .{
                     .service_name = opts.service_name,
                     .user = user_z,
                     .state = &.{
                         .conv = pam_conv.loginConv,
                         .ctx = &pam_ctx,
                     },
-                });
+                }) catch |err| {
+                    try reportInternalError(&pam_ctx, err);
+                    continue;
+                };
                 defer pam.deinit();
 
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const tty_path = try opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
-                try pam.setItem(.{ .tty = tty_path });
+                const tty_path = opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf) catch |err| {
+                    try reportInternalError(&pam_ctx, err);
+                    continue;
+                };
+                pam.setItem(.{ .tty = tty_path }) catch |err| {
+                    try reportInternalError(&pam_ctx, err);
+                    continue;
+                };
 
-                if (!(try authenticate(&pam, &pam_ctx))) continue;
+                authenticate(&pam, &pam_ctx) catch |err| switch (err) {
+                    error.AuthCancelled => continue,
+                    error.ConversationFailed => {
+                        const conv_err = pam_ctx.conv_error.?;
+                        if (conv_err != error.OutOfMemory) return conv_err;
+                        try reportInternalError(&pam_ctx, conv_err);
+                        continue;
+                    },
+                    error.AuthError,
+                    error.UserUnknown,
+                    error.PermissionDenied,
+                    error.AccountExpired,
+                    error.MaximumTries,
+                    error.CredentialsExpired,
+                    error.CredentialsInsufficient,
+                    => {
+                        try writeAuthResult(&pam_ctx, false);
+                        continue;
+                    },
+                    else => {
+                        try reportInternalError(&pam_ctx, err);
+                        continue;
+                    },
+                };
+                try writeAuthResult(&pam_ctx, true);
 
                 var session_setup = try getSession(opts.allocator, opts.ipc_conn, ipc_reader, &event_buf) orelse continue;
-                if (signals.shutdownRequested()) return;
+                if (signals.shutdownRequested()) {
+                    session_setup.env.deinit();
+                    return;
+                }
                 opts.ipc_conn.deinit(opts.io);
                 ipc_closed = true;
                 try runSession(opts.allocator, opts.io, opts.env_map, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
@@ -98,47 +137,27 @@ pub fn run(opts: RunOpts) !void {
     }
 }
 
-fn authenticate(
-    pam: *Pam(PamCtx),
-    pam_ctx: *PamCtx,
-) !bool {
-    pam.authenticate(.{}) catch {
-        if (pam_ctx.cancelled) {
-            log.debug("Pam auth cancelled", .{});
-            return false;
-        }
-
-        try writeAuthResult(pam_ctx, false);
-        return false;
+fn authenticate(pam: *Pam(PamCtx), ctx: *PamCtx) !void {
+    try checkPamResult(ctx, pam.authenticate(.{}));
+    checkPamResult(ctx, pam.accountMgmt(.{})) catch |err| switch (err) {
+        error.NewAuthTokenRequired => try checkPamResult(ctx, pam.changeAuthToken(.{ .change_expired_authtok = true })),
+        else => return err,
     };
-    pam.accountMgmt(.{}) catch |err| switch (err) {
-        error.NewAuthTokenRequired => {
-            log.debug("Pam auth token update required", .{});
-            pam.changeAuthToken(.{ .change_expired_authtok = true }) catch |change_err| {
-                if (pam_ctx.cancelled) {
-                    log.debug("Pam auth token update cancelled", .{});
-                    return false;
-                }
+    try checkPamResult(ctx, pam.setCred(.{ .action = .establish }));
+}
 
-                log.debug("Pam auth token update failed: {s}", .{@errorName(change_err)});
-                try writeAuthResult(pam_ctx, false);
-                return false;
-            };
-        },
-        else => {
-            log.debug("Pam account management failed: {s}", .{@errorName(err)});
-            try writeAuthResult(pam_ctx, false);
-            return false;
-        },
-    };
-    pam.setCred(.{ .action = .establish }) catch |err| {
-        log.debug("Pam credential establishment failed: {s}", .{@errorName(err)});
-        try writeAuthResult(pam_ctx, false);
-        return false;
-    };
+fn checkPamResult(ctx: *const PamCtx, result: PamError!void) !void {
+    if (ctx.cancelled) return error.AuthCancelled;
+    if (ctx.conv_error != null) return error.ConversationFailed;
+    return result;
+}
 
-    try writeAuthResult(pam_ctx, true);
-    return true;
+fn reportInternalError(ctx: *PamCtx, err: anyerror) !void {
+    log.err("Authentication internal error: {s}", .{@errorName(err)});
+    try ctx.ipc_conn.writeEvent(ctx.writer, &.{ .err = .{
+        .code = .internal_error,
+    } });
+    try ctx.writer.flush();
 }
 
 fn writeAuthResult(pam_ctx: *PamCtx, ok: bool) !void {
@@ -194,16 +213,18 @@ fn runSession(
     vt: Vt,
 ) !void {
     log.debug("Starting session...", .{});
-    const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
-    var tty_file = try session_vt.openSessionTty(io, env_map);
-    defer if (tty_file.handle > 2) tty_file.close(io);
-
-    var session = blk: {
+    var started = blk: {
         defer session_envmap.deinit();
-        break :blk try session_mod.start(PamCtx, allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
+        const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
+        const tty_file = try session_vt.openSessionTty(io, env_map);
+        errdefer if (tty_file.handle > 2) tty_file.close(io);
+
+        const session = try session_mod.start(PamCtx, allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
+        break :blk .{ .session = session, .tty_file = tty_file };
     };
-    defer session.deinit(io);
+    defer if (started.tty_file.handle > 2) started.tty_file.close(io);
+    defer started.session.deinit(io);
 
     log.debug("Waiting for session to end...", .{});
-    try signals.waitForChild(io, &session.child);
+    try signals.waitForChild(io, &started.session.child);
 }

@@ -65,6 +65,7 @@ fn ipcThreadMain(ctx: *Runtime.ServerCtx) void {
 
 const AuthState = enum {
     cancelled,
+    internal_error,
     failed,
     ok,
 };
@@ -145,9 +146,7 @@ fn runAuthSequence(
         event_buf,
         &step_state,
     );
-    if (auth_state == .cancelled) {
-        return .cancelled;
-    }
+    if (auth_state == .cancelled or auth_state == .internal_error) return auth_state;
 
     if (auth_state == .failed or !expected_user_matches) {
         try sendEvent(ctx, io_writer, &.{ .pam_auth_result = .{ .ok = false } });
@@ -162,9 +161,7 @@ fn runAuthSequence(
         event_buf,
         &step_state,
     );
-    if (post_auth_state == .cancelled) {
-        return .cancelled;
-    }
+    if (post_auth_state == .cancelled or post_auth_state == .internal_error) return post_auth_state;
 
     try sendEvent(ctx, io_writer, &.{ .pam_auth_result = .{ .ok = post_auth_state == .ok } });
 
@@ -181,6 +178,12 @@ fn runSteps(
 ) !AuthState {
     for (steps) |step| {
         switch (step) {
+            .internal_error => {
+                try sendEvent(ctx, io_writer, &.{ .err = .{
+                    .code = .internal_error,
+                } });
+                return .internal_error;
+            },
             .pam_message => |info| {
                 try sendEvent(ctx, io_writer, &.{ .pam_message = info });
             },
@@ -231,7 +234,7 @@ fn runSteps(
                             step_state.* = attempt_state;
                             break;
                         },
-                        .cancelled => return .cancelled,
+                        .cancelled, .internal_error => return retry_result,
                         .failed => {
                             if (attempt + 1 == retry.attempts) {
                                 return .failed;
