@@ -9,7 +9,7 @@ pub const Runtime = struct {
     ctx: *Runtime.ServerCtx,
 
     pub const Options = struct {
-        codec: *const ipc.Codec = &ipc.Codec.binary,
+        codec: ipc.Codec = .binary,
         preview: api.Options = .{},
     };
 

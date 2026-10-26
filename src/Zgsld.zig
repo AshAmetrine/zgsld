@@ -30,7 +30,7 @@ fn appendShellQuotedArg(
 
 vtable: *const VTable,
 process: ProcessContext,
-ipc_codec: *const ipc.Codec = &ipc.Codec.binary,
+ipc_codec: ipc.Codec = .binary,
 
 /// Context passed to `VTable.run`.
 pub const GreeterContext = struct {
@@ -59,7 +59,7 @@ pub const VTable = struct {
 };
 
 pub const Options = struct {
-    ipc_codec: *const ipc.Codec = &ipc.Codec.binary,
+    ipc_codec: ipc.Codec = .binary,
     vtable: *const VTable,
     process: ProcessContext,
 };

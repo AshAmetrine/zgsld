@@ -25,7 +25,7 @@ const SpawnedWorkers = struct {
 };
 
 pub const SessionManagerRunOpts = struct {
-    ipc_codec: *const ipc.Codec = &ipc.Codec.binary,
+    ipc_codec: ipc.Codec = .binary,
     allocator: std.mem.Allocator,
     io: std.Io,
     env_map: *const std.process.Environ.Map,
@@ -201,7 +201,7 @@ fn forwardIpc(
     greeter_file: std.Io.File,
     worker_file: std.Io.File,
     greeter_worker_proc: *std.process.Child,
-    ipc_codec: *const ipc.Codec,
+    ipc_codec: ipc.Codec,
 ) !void {
     var greeter_conn = ipc.Connection.init(greeter_file, .{ .codec = ipc_codec });
     defer greeter_conn.deinit(io);

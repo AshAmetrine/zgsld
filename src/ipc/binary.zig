@@ -8,7 +8,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const ipc = @import("../ipc.zig");
-const Codec = ipc.Codec;
 const Event = ipc.Event;
 const EventType = std.meta.Tag(Event);
 const SessionType = ipc.SessionType;
@@ -33,7 +32,7 @@ fn writeHeader(io_writer: *std.Io.Writer, tag: EventType, payload_len: u32) !voi
 ///
 /// Returned string/slice fields borrow from `event_buf` and are valid only
 /// until the next `readEvent` call that reuses that buffer.
-pub fn readEvent(_: *const Codec, io_reader: *std.Io.Reader, event_buf: []u8) !Event {
+pub fn readEvent(_: ?*anyopaque, io_reader: *std.Io.Reader, event_buf: []u8) !Event {
     const header = try readHeader(io_reader);
 
     const payload_len = header.payload_len;
@@ -103,7 +102,7 @@ pub fn readEvent(_: *const Codec, io_reader: *std.Io.Reader, event_buf: []u8) !E
 }
 
 /// Encodes and writes one event to the stream.
-pub fn writeEvent(_: *const Codec, io_writer: *std.Io.Writer, event: *const Event) !void {
+pub fn writeEvent(_: ?*anyopaque, io_writer: *std.Io.Writer, event: *const Event) !void {
     switch (event.*) {
         .pam_start_auth => |ev| {
             const user_len: u32 = @intCast(ev.user.len);

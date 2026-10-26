@@ -85,11 +85,12 @@ pub const Event = union(enum) {
 };
 
 pub const Codec = struct {
+    context: ?*anyopaque = null,
     vtable: *const VTable,
 
     pub const VTable = struct {
-        readEvent: *const fn (*const Codec, *std.Io.Reader, []u8) anyerror!Event,
-        writeEvent: *const fn (*const Codec, *std.Io.Writer, *const Event) anyerror!void,
+        readEvent: *const fn (?*anyopaque, *std.Io.Reader, []u8) anyerror!Event,
+        writeEvent: *const fn (?*anyopaque, *std.Io.Writer, *const Event) anyerror!void,
     };
 
     pub const binary: Codec = .{ .vtable = &.{
@@ -97,12 +98,12 @@ pub const Codec = struct {
         .writeEvent = Binary.writeEvent,
     } };
 
-    pub fn readEvent(self: *const Codec, reader: *std.Io.Reader, event_buf: []u8) !Event {
-        return self.vtable.readEvent(self, reader, event_buf);
+    pub fn readEvent(self: Codec, reader: *std.Io.Reader, event_buf: []u8) !Event {
+        return self.vtable.readEvent(self.context, reader, event_buf);
     }
 
-    pub fn writeEvent(self: *const Codec, writer: *std.Io.Writer, event: *const Event) !void {
-        return self.vtable.writeEvent(self, writer, event);
+    pub fn writeEvent(self: Codec, writer: *std.Io.Writer, event: *const Event) !void {
+        return self.vtable.writeEvent(self.context, writer, event);
     }
 };
 
@@ -111,13 +112,13 @@ pub const Connection = struct {
     const Self = @This();
 
     file: std.Io.File,
-    codec: *const Codec = &Codec.binary,
+    codec: Codec = .binary,
 
     pub const Options = struct {
-        codec: *const Codec = &Codec.binary,
+        codec: Codec = .binary,
     };
 
-    /// Takes ownership of `file` and borrows the codec supplied in `opts`.
+    /// Takes ownership of `file` and copies the codec handle, borrowing its context.
     pub fn init(file: std.Io.File, opts: Options) Self {
         return .{ .file = file, .codec = opts.codec };
     }
