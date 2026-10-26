@@ -66,6 +66,15 @@ in
       '';
     };
 
+    waitForPlymouth = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether to wait for Plymouth to exit before starting zgsld.
+        Disable this when the greeter handles Plymouth shutdown itself.
+      '';
+    };
+
     greeter = {
       command = lib.mkOption {
         type = lib.types.nonEmptyStr;
@@ -99,6 +108,9 @@ in
       }
     ];
 
+    services.displayManager.enable = lib.mkDefault true;
+    services.xserver.displayManager.lightdm.enable = false;
+    systemd.defaultUnit = "graphical.target";
     systemd.services."autovt@tty${toString cfg.vt}".enable = false;
 
     users.users.${greeterUser} = {
@@ -123,11 +135,13 @@ in
     systemd.services.zgsld = {
       description = "Zig Greeter and Session Launcher Daemon";
       aliases = [ "display-manager.service" ];
-      wantedBy = [ "multi-user.target" ];
+      wantedBy = [ "graphical.target" ];
+      wants = [ "systemd-user-sessions.service" ];
       after = [
         "systemd-user-sessions.service"
         "getty@tty${toString cfg.vt}.service"
-      ];
+      ]
+      ++ lib.optional cfg.waitForPlymouth "plymouth-quit-wait.service";
       restartIfChanged = false;
       conflicts = [ "getty@tty${toString cfg.vt}.service" ];
       serviceConfig = {
