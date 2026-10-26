@@ -52,6 +52,10 @@ pub fn readEvent(_: ?*anyopaque, io_reader: *std.Io.Reader, event_buf: []u8) !Ev
             },
         },
         .login_cancel => .login_cancel,
+        .session_accepted => blk: {
+            if (payload_len != 0) return error.InvalidPayload;
+            break :blk .session_accepted;
+        },
         .pam_message => blk: {
             if (payload_len == 0) return error.InvalidPayload;
             break :blk .{
@@ -116,6 +120,9 @@ pub fn writeEvent(_: ?*anyopaque, io_writer: *std.Io.Writer, event: *const Event
         },
         .login_cancel => {
             try writeHeader(io_writer, .login_cancel, 0);
+        },
+        .session_accepted => {
+            try writeHeader(io_writer, .session_accepted, 0);
         },
         .pam_message => |info| {
             const msg_len: u32 = @intCast(info.message.len);

@@ -29,6 +29,12 @@ pub const SessionCommand = struct {
 pub const SessionInfo = struct {
     session_type: SessionType,
     command: SessionCommand,
+
+    pub fn validate(self: SessionInfo, x11_supported: bool) error{InvalidSession}!void {
+        if (self.command.session_cmd.len == 0 or
+            std.mem.indexOfScalar(u8, self.command.session_cmd, 0) != null or
+            (self.session_type == .x11 and !x11_supported)) return error.InvalidSession;
+    }
 };
 
 /// Environment variable entry sent by the greeter before `start_session`.
@@ -94,6 +100,7 @@ pub const Event = union(enum) {
     start_session: SessionInfo,
     set_session_env: SessionEnvVar,
     err: ErrorInfo,
+    session_accepted: void,
 };
 
 pub const Codec = struct {

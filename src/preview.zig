@@ -1,6 +1,7 @@
 const std = @import("std");
 const ipc = @import("ipc");
 const SocketPair = @import("SocketPair.zig");
+const build_options = @import("build_options");
 pub const api = @import("preview/api.zig");
 
 pub const Runtime = struct {
@@ -116,8 +117,13 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
             .set_session_env => {
                 if (!authenticated) return error.UnexpectedPreviewEvent;
             },
-            .start_session => {
+            .start_session => |info| {
                 if (!authenticated) return error.UnexpectedPreviewEvent;
+                info.validate(build_options.x11_support) catch {
+                    try sendEvent(ctx, io_writer, &.{ .err = .{ .code = .invalid_request } });
+                    continue;
+                };
+                try sendEvent(ctx, io_writer, &.session_accepted);
                 return;
             },
             else => return error.UnexpectedPreviewEvent,

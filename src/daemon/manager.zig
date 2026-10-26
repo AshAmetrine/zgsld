@@ -14,7 +14,28 @@ const ForwardIpcCtx = struct {
     io: std.Io,
     src: *ipc.Connection,
     dst: *ipc.Connection,
+    writer: *std.Io.Writer,
+    mutex: std.Io.Mutex = .init,
+    authenticated: bool = false,
     result: anyerror!void = {},
+
+    fn sendEvent(self: *ForwardIpcCtx, event: ipc.Event) !void {
+        try self.dst.writeEvent(self.writer, &event);
+        try self.writer.flush();
+    }
+
+    fn acceptSession(self: *ForwardIpcCtx, info: ipc.SessionInfo) !bool {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        if (!self.authenticated) return error.UnexpectedEvent;
+        info.validate(build_options.x11_support) catch {
+            try self.sendEvent(.{ .err = .{ .code = .invalid_request } });
+            return false;
+        };
+        try self.sendEvent(.session_accepted);
+        self.authenticated = false;
+        return true;
+    }
 };
 
 const SpawnedWorkers = struct {
@@ -208,10 +229,13 @@ fn forwardIpc(
     var worker_conn = ipc.Connection.init(worker_file, .{});
     defer worker_conn.deinit(io);
 
+    var reply_buf: [ipc.event_buf_size]u8 = undefined;
+    var reply_writer = greeter_conn.writer(io, &reply_buf);
     var worker_to_greeter = ForwardIpcCtx{
         .io = io,
         .src = &worker_conn,
         .dst = &greeter_conn,
+        .writer = &reply_writer.interface,
     };
 
     const worker_to_greeter_thread = try std.Thread.spawn(.{}, forwardIpcThread, .{&worker_to_greeter});
@@ -237,8 +261,17 @@ fn forwardIpc(
                 else => return err,
             };
 
-            if (event == .start_session) {
-                try waitWorkerAndClearPid(io, &greeter_worker_pid, greeter_worker_proc);
+            switch (event) {
+                .pam_start_auth, .login_cancel => {
+                    worker_to_greeter.mutex.lockUncancelable(io);
+                    worker_to_greeter.authenticated = false;
+                    worker_to_greeter.mutex.unlock(io);
+                },
+                .start_session => |info| {
+                    if (!try worker_to_greeter.acceptSession(info)) continue;
+                    try waitWorkerAndClearPid(io, &greeter_worker_pid, greeter_worker_proc);
+                },
+                else => {},
             }
 
             try worker_conn.writeEvent(io_writer, &event);
@@ -289,12 +322,9 @@ fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
 fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     var rbuf: [ipc.event_buf_size]u8 = undefined;
-    var wbuf: [ipc.event_buf_size]u8 = undefined;
 
     var reader = ctx.src.reader(ctx.io, &rbuf);
-    var writer = ctx.dst.writer(ctx.io, &wbuf);
     const io_reader = &reader.interface;
-    const io_writer = &writer.interface;
 
     while (true) {
         const event = ctx.src.readEvent(io_reader, &event_buf) catch |err| switch (err) {
@@ -302,8 +332,14 @@ fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
             else => return err,
         };
 
-        try ctx.dst.writeEvent(io_writer, &event);
-        try io_writer.flush();
+        ctx.mutex.lockUncancelable(ctx.io);
+        defer ctx.mutex.unlock(ctx.io);
+        switch (event) {
+            .pam_auth_result => |result| ctx.authenticated = result.ok,
+            .err => ctx.authenticated = false,
+            else => {},
+        }
+        try ctx.sendEvent(event);
     }
 }
 
