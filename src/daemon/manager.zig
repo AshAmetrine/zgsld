@@ -37,7 +37,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
     installSignalHandlers();
 
     if (!build_options.x11_support and opts.config.greeter.session_type == .x11) {
-        log.err("Greeter X11 session type requested, but zgsld was built without -Dx11 support", .{});
+        log.err("Greeter X11 session type requested, but zgsld was built without X11 support", .{});
         return error.X11UnsupportedBuild;
     }
 
@@ -343,7 +343,7 @@ fn shouldRunAutologin(config: Config) !bool {
     if (autologin_user.len == 0) return false;
 
     if (!build_options.x11_support and autologin.session_type == .x11) {
-        log.warn("Autologin X11 session type requested, but zgsld was built without -Dx11 support; starting greeter instead", .{});
+        log.warn("Autologin X11 session type requested, but zgsld was built without X11 support; starting greeter instead", .{});
         return false;
     }
 

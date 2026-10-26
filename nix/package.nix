@@ -20,8 +20,8 @@ zigPackage {
 
   zigBuildFlags = [
     "--release=safe"
-  ]
-  ++ lib.optional x11Support "-Dx11";
+    "-Dx11=${lib.boolToString x11Support}"
+  ];
 
   nativeInstallCheckInputs = [ versionCheckHook ];
   doInstallCheck = stdenv.buildPlatform.canExecute stdenv.hostPlatform;

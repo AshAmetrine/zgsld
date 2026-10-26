@@ -6,7 +6,7 @@ ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greet
 
 - Supports standalone greeter builds without requiring the `zgsld` executable to be installed.
 - Autologin support with an optional interruptible delay that falls back to the greeter.
-- Can be built with X11 session support.
+- Supports X11 sessions by default; disable with `-Dx11=false`.
 
 ## Dependencies
 

@@ -37,7 +37,7 @@ Set this to `false` to use a separate `zgsld` daemon, allowing users to switch g
 
 ### `x11`
 
-Whether standalone builds should support starting the X server. This is a no-op when `.standalone = false`.
+Whether standalone builds should support starting the X server. Defaults to `true`. This is a no-op when `.standalone = false`.
 
 ## API
 

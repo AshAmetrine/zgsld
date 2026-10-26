@@ -1,7 +1,7 @@
 //! Configuration used by zgsld.
 //!
 //! The concrete field types depend on build options:
-//! - `x11` is `void` when built without `-Dx11`.
+//! - `x11` is `void` when built with `-Dx11=false`.
 
 const build_options = @import("build_options");
 const ipc = @import("ipc");
@@ -56,6 +56,6 @@ greeter: GreeterConfig = .{},
 session: SessionConfig = .{},
 autologin: AutologinConfig = .{},
 
-/// X11 configuration (`void` when built without `-Dx11`).
+/// X11 configuration (`void` when built with `-Dx11=false`).
 x11: if (build_options.x11_support) X11Config else void =
     if (build_options.x11_support) .{} else {},

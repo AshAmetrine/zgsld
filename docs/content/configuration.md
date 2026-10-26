@@ -42,7 +42,7 @@ session_type = command
 # Greeter command with optional args
 command = /usr/bin/zgsld-agetty-greeter
 
-# Only when built with x11 support (-Dx11)
+# Only when built with X11 support (enabled by default)
 [x11]
 # X server command with optional args
 command = /bin/X
@@ -109,7 +109,7 @@ user = alice
 Controls how the autologin session is launched.
 
 - Default: `command`
-- Valid values: `command`, or `x11` when built with `-Dx11`
+- Valid values: `command`, or `x11` when built with X11 support
 
 Example:
 
@@ -181,7 +181,7 @@ service_name =
 Controls how the greeter session is launched.
 
 - Default: `command`
-- Valid values: `command`, or `x11` when built with `-Dx11`
+- Valid values: `command`, or `x11` when built with X11 support
 
 Example:
 
@@ -206,11 +206,11 @@ command = /usr/bin/zgsld-agetty-greeter
 
 ### `[x11]`
 
-This section is only relevant if ZGSLD was built with `-Dx11`.
+This section is only relevant if ZGSLD was built with X11 support, which is enabled by default.
 
 #### `command`
 
-Sets the X server command used for X11 sessions. Only applicable when zgsld is built with X11 support with `-Dx11`.
+Sets the X server command used for X11 sessions. Only applicable when zgsld is built with X11 support.
 
 - Default: `/bin/X`
 - Valid values: X server command with optional args
