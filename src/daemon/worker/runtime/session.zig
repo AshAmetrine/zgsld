@@ -195,38 +195,26 @@ pub const Session = struct {
 
         const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr };
 
+        try opts.vt.activate(opts.io);
+        const tty_file = try opts.vt.openDevice(opts.io, opts.env_map, .read_write);
+        defer tty_file.close(opts.io);
+        const groups = try utils.getGroups(allocator, opts.user_info);
+        defer allocator.free(groups);
+        var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const dir = try std.fmt.bufPrintSentinel(&dir_buf, "{s}", .{opts.home_dir orelse "/"}, 0);
+
         const session_pid = std.c.fork();
         if (session_pid < 0) return std.posix.unexpectedErrno(std.c.errno(session_pid));
         if (session_pid == 0) {
-            {
-                opts.vt.activate(opts.io) catch |err| {
-                    log.err("Failed to activate session tty: {s}", .{@errorName(err)});
-                    std.process.exit(1);
-                };
-
-                var tty_file = opts.vt.openDevice(opts.io, opts.env_map, .read_write) catch |err| {
-                    log.err("Failed to open session tty device: {s}", .{@errorName(err)});
-                    std.process.exit(1);
-                };
-                defer if (tty_file.handle > 2) tty_file.close(opts.io);
-
-                (switch (opts.stderr) {
-                    .inherit => tty.redirectStdinAndStdoutToTty(tty_file.handle),
-                    .tty => tty.redirectStdioToTty(tty_file.handle),
-                }) catch |err| {
-                    log.err("Failed to redirect session stdio: {s}", .{@errorName(err)});
-                    std.process.exit(1);
-                };
-            }
-
-            utils.dropPrivileges(opts.user_info) catch std.process.exit(1);
-            const dir = opts.home_dir orelse "/";
-            var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const dir_z = std.fmt.bufPrintSentinel(&dir_buf, "{s}", .{dir}, 0) catch std.process.exit(1);
-            if (std.c.chdir(dir_z) != 0) std.process.exit(1);
-
+            (switch (opts.stderr) {
+                .inherit => tty.redirectStdinAndStdoutToTty(tty_file.handle),
+                .tty => tty.redirectStdioToTty(tty_file.handle),
+            }) catch std.c._exit(1);
+            if (tty_file.handle > 2) _ = std.c.close(tty_file.handle);
+            utils.dropPrivileges(opts.user_info, groups) catch std.c._exit(1);
+            if (std.c.chdir(dir) != 0) std.c._exit(1);
             _ = std.c.execve("/bin/sh", &wrapper, opts.environ.ptr);
-            std.process.exit(1);
+            std.c._exit(1);
         }
 
         return .{

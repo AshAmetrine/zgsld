@@ -6,8 +6,6 @@ const tty = @import("../tty.zig");
 
 pub const xauth = @import("xauth.zig");
 
-const log = std.log.scoped(.zgsld_worker);
-
 const XServerOpts = struct {
     io: std.Io,
     env_map: *const std.process.Environ.Map,
@@ -43,28 +41,19 @@ pub fn startXServer(allocator: std.mem.Allocator, opts: XServerOpts) !std.proces
         if (vt) |arg| arg.ptr else null,
     };
 
+    const tty_file = try opts.vt.openDevice(opts.io, opts.env_map, .read_write);
+    defer tty_file.close(opts.io);
+    const groups = if (opts.user) |user| try utils.getGroups(allocator, user) else null;
+    defer if (groups) |list| allocator.free(list);
+
     const pid = std.c.fork();
     if (pid < 0) return std.posix.unexpectedErrno(std.c.errno(pid));
     if (pid == 0) {
-        {
-            var tty_file = opts.vt.openDevice(opts.io, opts.env_map, .read_write) catch |err| {
-                log.err("Failed to open X server tty device: {s}", .{@errorName(err)});
-                std.process.exit(1);
-            };
-            defer if (tty_file.handle > 2) tty_file.close(opts.io);
-
-            tty.redirectStdinToTty(tty_file.handle) catch |err| {
-                log.err("Failed to redirect X server stdin to tty: {s}", .{@errorName(err)});
-                std.process.exit(1);
-            };
-        }
-
-        if (opts.user) |u| {
-            utils.dropPrivileges(u) catch std.process.exit(1);
-        }
-
+        tty.redirectStdinToTty(tty_file.handle) catch std.c._exit(1);
+        if (tty_file.handle > 2) _ = std.c.close(tty_file.handle);
+        if (opts.user) |user| utils.dropPrivileges(user, groups.?) catch std.c._exit(1);
         _ = std.c.execve("/bin/sh", &argv, opts.environ.ptr);
-        std.process.exit(1);
+        std.c._exit(1);
     }
 
     var server: std.process.Child = .{

@@ -1,7 +1,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-extern "c" fn initgroups(user: [*:0]const u8, group: std.posix.gid_t) c_int;
+const setgroups = switch (builtin.os.tag) {
+    .linux => struct {
+        extern "c" fn setgroups(count: usize, groups: [*]const std.posix.gid_t) c_int;
+    }.setgroups,
+    else => struct {
+        extern "c" fn setgroups(count: c_int, groups: [*]const std.posix.gid_t) c_int;
+    }.setgroups,
+};
+
+extern "c" fn getgrouplist(user: [*:0]const u8, group: std.posix.gid_t, groups: ?[*]std.posix.gid_t, count: *c_int) c_int;
 
 pub const UserInfo = struct {
     username: [:0]const u8,
@@ -9,12 +18,22 @@ pub const UserInfo = struct {
     gid: std.posix.gid_t,
 };
 
-pub fn dropPrivileges(user_info: UserInfo) !void {
-    if (initgroups(user_info.username, user_info.gid) != 0) {
-        return std.posix.unexpectedErrno(std.posix.errno(-1));
+pub fn getGroups(allocator: std.mem.Allocator, user: UserInfo) ![]std.posix.gid_t {
+    var groups: std.ArrayList(std.posix.gid_t) = .empty;
+    errdefer groups.deinit(allocator);
+    var count: c_int = 0;
+    while (getgrouplist(user.username, user.gid, if (groups.capacity == 0) null else groups.items.ptr, &count) < 0) {
+        if (count <= 0 or @as(usize, @intCast(count)) <= groups.capacity) return error.GroupLookupFailed;
+        try groups.ensureTotalCapacityPrecise(allocator, @intCast(count));
     }
-    if (std.c.setgid(user_info.gid) != 0) return std.posix.unexpectedErrno(std.posix.errno(-1));
-    if (std.c.setuid(user_info.uid) != 0) return std.posix.unexpectedErrno(std.posix.errno(-1));
+    groups.items.len = @intCast(count);
+    return groups.toOwnedSlice(allocator);
+}
+
+pub fn dropPrivileges(user_info: UserInfo, groups: []const std.posix.gid_t) !void {
+    if (setgroups(@intCast(groups.len), groups.ptr) != 0) return error.SetGroupsFailed;
+    if (std.c.setgid(user_info.gid) != 0) return error.SetGidFailed;
+    if (std.c.setuid(user_info.uid) != 0) return error.SetUidFailed;
 }
 
 pub fn ensureOwnedDirAt(
