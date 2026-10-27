@@ -7,13 +7,16 @@ const tty = @import("../tty.zig");
 
 const xauth = @import("xauth.zig");
 const XServer = @This();
+const Connection = @import("../../../Shutdown/Connection.zig");
 
 child: std.process.Child,
+control: *Connection,
 xauth_path: [:0]const u8,
 allocator: std.mem.Allocator,
 
 pub const Options = struct {
     io: std.Io,
+    control: *Connection,
     host_env_map: *const std.process.Environ.Map,
     envmap: *std.process.Environ.Map,
     vt: Vt,
@@ -69,8 +72,7 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
     const groups = try utils.getGroups(allocator, opts.user);
     defer allocator.free(groups);
 
-    const pid = std.c.fork();
-    if (pid < 0) return std.posix.unexpectedErrno(std.c.errno(pid));
+    const pid = try opts.control.fork(.x11);
     if (pid == 0) {
         ready.prepareChild();
         tty.redirectStdinToTty(tty_file.handle) catch std.c._exit(1);
@@ -90,19 +92,20 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
         .stderr = null,
         .request_resource_usage_statistics = false,
     };
-    errdefer server.kill(opts.io);
+    errdefer opts.control.stop(&server, .x11);
 
     const ready_result = ready.wait(opts.io, display_num, 5000);
     if (hasExited(pid)) {
         server.id = null;
+        try opts.control.exited(.x11);
         return error.XServerExited;
     }
     try ready_result;
-    return .{ .child = server, .xauth_path = xauth_path_z, .allocator = allocator };
+    return .{ .child = server, .control = opts.control, .xauth_path = xauth_path_z, .allocator = allocator };
 }
 
 pub fn deinit(self: *XServer, io: std.Io) void {
-    self.child.kill(io);
+    self.control.stop(&self.child, .x11);
     std.Io.Dir.deleteFileAbsolute(io, self.xauth_path) catch {};
     self.allocator.free(self.xauth_path);
     self.* = undefined;

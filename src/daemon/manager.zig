@@ -2,13 +2,10 @@ const std = @import("std");
 const ipc = @import("ipc");
 const SocketPair = @import("../SocketPair.zig");
 const worker = @import("worker.zig");
+const Shutdown = @import("Shutdown.zig");
 const log = std.log.scoped(.zgsld);
 const Config = @import("../Config.zig");
 const build_options = @import("build_options");
-
-var greeter_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
-var session_worker_pid = std.atomic.Value(std.posix.pid_t).init(0);
-var shutdown_requested = std.atomic.Value(bool).init(false);
 
 const ForwardIpcCtx = struct {
     io: std.Io,
@@ -39,8 +36,8 @@ const ForwardIpcCtx = struct {
 };
 
 const SpawnedWorkers = struct {
-    session_proc: std.process.Child,
-    greeter_proc: std.process.Child,
+    session: *Shutdown.Worker,
+    greeter: *Shutdown.Worker,
     session_file: std.Io.File,
     greeter_file: std.Io.File,
 };
@@ -55,7 +52,9 @@ pub const SessionManagerRunOpts = struct {
 };
 
 pub fn run(opts: SessionManagerRunOpts) !void {
-    installSignalHandlers();
+    var shutdown = try Shutdown.init(opts.io, .{});
+    defer shutdown.deinit();
+    try shutdown.start();
 
     if (!build_options.x11_support and opts.config.greeter.session_type == .x11) {
         log.err("Greeter X11 session type requested, but zgsld was built without X11 support", .{});
@@ -71,122 +70,99 @@ pub fn run(opts: SessionManagerRunOpts) !void {
 
     if (try shouldRunAutologin(opts.config)) {
         defer opts.config.vt.normalize(opts.io, opts.env_map) catch {};
-        if (shutdown_requested.load(.seq_cst)) return;
-        try runAutologin(opts);
-        if (shutdown_requested.load(.seq_cst)) return;
+        if (Shutdown.shutdownRequested()) return;
+        try runAutologin(opts, &shutdown);
+        if (Shutdown.shutdownRequested()) return;
     }
 
     while (true) {
         defer opts.config.vt.normalize(opts.io, opts.env_map) catch {};
-        if (shutdown_requested.load(.seq_cst)) return;
+        if (Shutdown.shutdownRequested()) return;
 
-        var spawned = try spawnWorkers(opts);
-
-        session_worker_pid.store(spawned.session_proc.id.?, .seq_cst);
-        greeter_worker_pid.store(spawned.greeter_proc.id.?, .seq_cst);
-        defer terminateWorkerAndClearPid(opts.io, &session_worker_pid, &spawned.session_proc);
-        defer terminateWorkerAndClearPid(opts.io, &greeter_worker_pid, &spawned.greeter_proc);
-
-        if (shutdown_requested.load(.seq_cst)) {
-            std.posix.kill(spawned.greeter_proc.id.?, std.posix.SIG.TERM) catch {};
-            std.posix.kill(spawned.session_proc.id.?, std.posix.SIG.TERM) catch {};
+        const spawned = try spawnWorkers(opts, &shutdown);
+        defer {
+            shutdown.requestStop(spawned.greeter, 0);
+            shutdown.requestStop(spawned.session, 0);
+            shutdown.stop(spawned.greeter);
+            shutdown.stop(spawned.session);
         }
 
-        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, &spawned.greeter_proc, opts.ipc_codec);
-        try waitWorkerAndClearPid(opts.io, &greeter_worker_pid, &spawned.greeter_proc);
-        try waitWorkerAndClearPid(opts.io, &session_worker_pid, &spawned.session_proc);
+        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, &shutdown, spawned.greeter, opts.ipc_codec);
+        try waitWorker(&shutdown, spawned.greeter);
+        try waitWorker(&shutdown, spawned.session);
     }
 }
 
-fn spawnWorkers(opts: SessionManagerRunOpts) !SpawnedWorkers {
-    log.debug("Spawning Session Worker...", .{});
+fn spawnWorkers(opts: SessionManagerRunOpts, shutdown: *Shutdown) !SpawnedWorkers {
     const session_socks = try SocketPair.init();
     errdefer session_socks.parent.close(opts.io);
+    const session_proc = try spawnWorker(opts, shutdown, .user, session_socks);
+    errdefer shutdown.stop(session_proc);
 
-    var session_proc = blk: {
-        defer session_socks.child.close(opts.io);
-        break :blk try worker.process.spawn(.{
-            .allocator = opts.allocator,
-            .io = opts.io,
-            .env_map = opts.env_map,
-            .worker_path = opts.self_exe_path,
-            .config = opts.config,
-            .session_class = .user,
-            .ipc_file = session_socks.child,
-        });
-    };
-    errdefer session_proc.kill(opts.io);
-
-    log.debug("Spawning Greeter worker...", .{});
     const greeter_socks = try SocketPair.init();
     errdefer greeter_socks.parent.close(opts.io);
-
-    const greeter_proc = blk: {
-        defer greeter_socks.child.close(opts.io);
-        break :blk try worker.process.spawn(.{
-            .allocator = opts.allocator,
-            .io = opts.io,
-            .env_map = opts.env_map,
-            .worker_path = opts.self_exe_path,
-            .config = opts.config,
-            .session_class = .greeter,
-            .ipc_file = greeter_socks.child,
-        });
-    };
-
+    const greeter_proc = try spawnWorker(opts, shutdown, .greeter, greeter_socks);
     return .{
-        .session_proc = session_proc,
-        .greeter_proc = greeter_proc,
+        .session = session_proc,
+        .greeter = greeter_proc,
         .session_file = session_socks.parent,
         .greeter_file = greeter_socks.parent,
     };
 }
 
-fn runAutologin(opts: SessionManagerRunOpts) !void {
+fn spawnWorker(opts: SessionManagerRunOpts, shutdown: *Shutdown, session_class: worker.process.SessionClass, ipc_socks: ?SocketPair) !*Shutdown.Worker {
+    defer if (ipc_socks) |socks| socks.child.close(opts.io);
+    const control = try Shutdown.Connection.socketPair();
+    defer control.child.close(opts.io);
+    errdefer control.parent.close(opts.io);
+    var proc = try worker.process.spawn(.{
+        .allocator = opts.allocator,
+        .io = opts.io,
+        .env_map = opts.env_map,
+        .worker_path = opts.self_exe_path,
+        .config = opts.config,
+        .session_class = session_class,
+        .ipc_file = if (ipc_socks) |socks| socks.child else null,
+        .control_file = control.child,
+    });
+    errdefer {
+        std.posix.kill(proc.id.?, .KILL) catch {};
+        _ = proc.wait(opts.io) catch {};
+    }
+    return shutdown.addWorker(proc, control.parent, if (ipc_socks) |socks| socks.parent else null);
+}
+
+fn runAutologin(opts: SessionManagerRunOpts, shutdown: *Shutdown) !void {
     const autologin = opts.config.autologin;
 
     if (autologin.timeout_seconds != 0) {
         try opts.config.vt.activate(opts.io);
         var watcher = opts.config.vt.watchInput(opts.io, opts.env_map) catch |err| {
-            if (shutdown_requested.load(.seq_cst)) return;
+            if (Shutdown.shutdownRequested()) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;
         };
         defer watcher.deinit(opts.io);
 
         const interrupted = waitAutologinCountdown(opts.io, &watcher, autologin.timeout_seconds) catch |err| {
-            if (shutdown_requested.load(.seq_cst)) return;
+            if (Shutdown.shutdownRequested()) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;
         };
-        if (shutdown_requested.load(.seq_cst)) return;
+        if (Shutdown.shutdownRequested()) return;
         if (interrupted) {
             log.debug("Autologin interrupted; starting greeter", .{});
             return;
         }
     }
 
-    if (shutdown_requested.load(.seq_cst)) return;
+    if (Shutdown.shutdownRequested()) return;
 
     log.debug("Spawning Autologin worker...", .{});
-    var autologin_proc = try worker.process.spawn(.{
-        .allocator = opts.allocator,
-        .io = opts.io,
-        .env_map = opts.env_map,
-        .worker_path = opts.self_exe_path,
-        .config = opts.config,
-        .session_class = .autologin,
-        .ipc_file = null,
-    });
+    const autologin_proc = try spawnWorker(opts, shutdown, .autologin, null);
+    defer shutdown.stop(autologin_proc);
 
-    session_worker_pid.store(autologin_proc.id.?, .seq_cst);
-    defer terminateWorkerAndClearPid(opts.io, &session_worker_pid, &autologin_proc);
-
-    if (shutdown_requested.load(.seq_cst)) {
-        std.posix.kill(autologin_proc.id.?, std.posix.SIG.TERM) catch {};
-    }
-
-    waitWorkerAndClearPid(opts.io, &session_worker_pid, &autologin_proc) catch |err| {
+    waitWorker(shutdown, autologin_proc) catch |err| {
         log.warn("Autologin failed: {s}", .{@errorName(err)});
     };
 }
@@ -198,7 +174,7 @@ fn waitAutologinCountdown(io: std.Io, watcher: *Config.Vt.InputWatcher, timeout_
     while (remaining > 0) : (remaining -= 1) {
         writeAutologinCountdown(io, &watcher.file, remaining);
         const interrupted = try watcher.waitForInput(std.time.ms_per_s);
-        if (shutdown_requested.load(.seq_cst) or interrupted) return true;
+        if (Shutdown.shutdownRequested() or interrupted) return true;
     }
     return false;
 }
@@ -221,7 +197,8 @@ fn forwardIpc(
     io: std.Io,
     greeter_file: std.Io.File,
     worker_file: std.Io.File,
-    greeter_worker_proc: *std.process.Child,
+    shutdown: *Shutdown,
+    greeter_worker_proc: *Shutdown.Worker,
     ipc_codec: ipc.Codec,
 ) !void {
     var greeter_conn = ipc.Connection.init(greeter_file, .{ .codec = ipc_codec });
@@ -269,7 +246,9 @@ fn forwardIpc(
                 },
                 .start_session => |info| {
                     if (!try worker_to_greeter.acceptSession(info)) continue;
-                    try waitWorkerAndClearPid(io, &greeter_worker_pid, greeter_worker_proc);
+                    shutdown.requestStop(greeter_worker_proc, 5);
+                    try waitWorker(shutdown, greeter_worker_proc);
+                    if (Shutdown.shutdownRequested()) return error.Shutdown;
                 },
                 else => {},
             }
@@ -282,16 +261,11 @@ fn forwardIpc(
     return worker_to_greeter.result;
 }
 
-fn waitWorkerAndClearPid(
-    io: std.Io,
-    pid_slot: *std.atomic.Value(std.posix.pid_t),
-    proc: *std.process.Child,
-) !void {
-    defer pid_slot.store(0, .seq_cst);
-    if (proc.id == null) return;
-    const term = try proc.wait(io);
+fn waitWorker(shutdown: *Shutdown, proc: *Shutdown.Worker) !void {
+    if (proc.process.id == null) return;
+    const term = try shutdown.wait(proc);
+    if (proc.forced) return;
     const code: u8 = if (term == .exited) term.exited else 1;
-
     switch (code) {
         0 => {},
         2 => {
@@ -300,15 +274,6 @@ fn waitWorkerAndClearPid(
         },
         else => return error.WorkerError,
     }
-}
-
-fn terminateWorkerAndClearPid(
-    io: std.Io,
-    pid_slot: *std.atomic.Value(std.posix.pid_t),
-    proc: *std.process.Child,
-) void {
-    defer pid_slot.store(0, .seq_cst);
-    proc.kill(io);
 }
 
 fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
@@ -340,36 +305,6 @@ fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
             else => {},
         }
         try ctx.sendEvent(event);
-    }
-}
-
-fn installSignalHandlers() void {
-    const sigact = std.posix.Sigaction{
-        .handler = .{ .handler = forwardSignalToWorker },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    };
-
-    const forward_signals = [_]std.posix.SIG{
-        std.posix.SIG.TERM,
-        std.posix.SIG.HUP,
-        std.posix.SIG.QUIT,
-    };
-
-    for (forward_signals) |sig| {
-        std.posix.sigaction(sig, &sigact, null);
-    }
-}
-
-fn forwardSignalToWorker(sig: std.posix.SIG) callconv(.c) void {
-    const gwpid = greeter_worker_pid.load(.seq_cst);
-    const swpid = session_worker_pid.load(.seq_cst);
-    shutdown_requested.store(true, .seq_cst);
-    if (gwpid > 0) {
-        std.posix.kill(gwpid, sig) catch {};
-    }
-    if (swpid > 0) {
-        std.posix.kill(swpid, sig) catch {};
     }
 }
 

@@ -8,6 +8,7 @@ const utils = @import("user.zig");
 const Pam = @import("pam").Pam;
 const UserInfo = utils.UserInfo;
 const Vt = @import("vt").Vt;
+const Connection = @import("../../Shutdown/Connection.zig");
 
 const StderrMode = enum {
     inherit,
@@ -33,6 +34,7 @@ pub fn start(
     comptime T: type,
     allocator: std.mem.Allocator,
     io: std.Io,
+    control: *Connection,
     host_env_map: *const std.process.Environ.Map,
     user: [:0]const u8,
     info: ipc.SessionInfo,
@@ -45,6 +47,7 @@ pub fn start(
     const user_info = try env_mod.applyUserEnv(session_envmap, user);
     return Session.spawn(allocator, .{
         .io = io,
+        .control = control,
         .host_env_map = host_env_map,
         .session_info = info,
         .envmap = session_envmap,
@@ -55,11 +58,12 @@ pub fn start(
 
 pub const Session = struct {
     child: std.process.Child,
+    control: *Connection,
 
     x11: if (build_options.x11_support) ?XServer else void = if (build_options.x11_support) null else {},
 
     pub fn deinit(self: *Session, io: std.Io) void {
-        self.child.kill(io);
+        self.control.stop(&self.child, .session);
         if (build_options.x11_support) {
             if (self.x11) |*xsession| xsession.deinit(io);
         }
@@ -67,6 +71,7 @@ pub const Session = struct {
 
     const SpawnOpts = struct {
         io: std.Io,
+        control: *Connection,
         host_env_map: *const std.process.Environ.Map,
         session_info: ipc.SessionInfo,
         envmap: *std.process.Environ.Map,
@@ -86,6 +91,7 @@ pub const Session = struct {
         if (build_options.x11_support and opts.session_info.session_type == .x11) {
             xserver = try XServer.spawn(allocator, .{
                 .io = opts.io,
+                .control = opts.control,
                 .host_env_map = opts.host_env_map,
                 .envmap = opts.envmap,
                 .vt = opts.vt,
@@ -99,6 +105,7 @@ pub const Session = struct {
 
         const session_child = try runSessionCommand(allocator, .{
             .io = opts.io,
+            .control = opts.control,
             .env_map = opts.host_env_map,
             .cmd = opts.session_info.command,
             .environ = session_environ.slice,
@@ -109,12 +116,14 @@ pub const Session = struct {
         });
         return .{
             .child = session_child,
+            .control = opts.control,
             .x11 = xserver,
         };
     }
 
     const SessionCommandOpts = struct {
         io: std.Io,
+        control: *Connection,
         env_map: *const std.process.Environ.Map,
         cmd: ipc.SessionCommand,
         user_info: UserInfo,
@@ -143,8 +152,7 @@ pub const Session = struct {
         var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
         const dir = try std.fmt.bufPrintSentinel(&dir_buf, "{s}", .{opts.home_dir orelse "/"}, 0);
 
-        const session_pid = std.c.fork();
-        if (session_pid < 0) return std.posix.unexpectedErrno(std.c.errno(session_pid));
+        const session_pid = try opts.control.fork(.session);
         if (session_pid == 0) {
             (switch (opts.stderr) {
                 .inherit => tty.redirectStdinAndStdoutToTty(tty_file.handle),

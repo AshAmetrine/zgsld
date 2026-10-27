@@ -1,13 +1,14 @@
 const std = @import("std");
 const ipc = @import("ipc");
 const session_mod = @import("session.zig");
-const signals = @import("signals.zig");
 const Pam = @import("pam").Pam;
 const Vt = @import("vt").Vt;
+const Connection = @import("../../Shutdown/Connection.zig");
 
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
+    control: *Connection,
     env_map: *const std.process.Environ.Map,
     service_name: []const u8,
     user: [:0]const u8,
@@ -40,9 +41,9 @@ pub fn run(opts: RunOpts) !void {
         if (opts.info.session_type == .x11) {
             try session_envmap.put("XDG_SESSION_TYPE", "x11");
         }
-        break :blk try session_mod.start(void, opts.allocator, opts.io, opts.env_map, opts.user, opts.info, &pam, &session_envmap, session_vt);
+        break :blk try session_mod.start(void, opts.allocator, opts.io, opts.control, opts.env_map, opts.user, opts.info, &pam, &session_envmap, session_vt);
     };
     defer session.deinit(opts.io);
 
-    try signals.waitForChild(opts.io, &session.child);
+    try opts.control.wait(&session.child, .session);
 }

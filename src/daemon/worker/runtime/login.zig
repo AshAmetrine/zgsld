@@ -6,6 +6,7 @@ const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
 const Vt = @import("vt").Vt;
+const Connection = @import("../../Shutdown/Connection.zig");
 
 const PamCtx = pam_conv.PamCtx;
 
@@ -21,6 +22,7 @@ const SessionEnvKey = enum {
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
+    control: *Connection,
     env_map: *const std.process.Environ.Map,
     service_name: []const u8,
     ipc_conn: *ipc.Connection,
@@ -129,7 +131,7 @@ pub fn run(opts: RunOpts) !void {
                 }
                 opts.ipc_conn.deinit(opts.io);
                 ipc_closed = true;
-                try runSession(opts.allocator, opts.io, opts.env_map, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
+                try runSession(opts.allocator, opts.io, opts.control, opts.env_map, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
                 return;
             },
             else => return error.UnexpectedEvent,
@@ -205,6 +207,7 @@ fn getSession(
 fn runSession(
     allocator: std.mem.Allocator,
     io: std.Io,
+    control: *Connection,
     env_map: *const std.process.Environ.Map,
     user_z: [:0]const u8,
     info: ipc.SessionInfo,
@@ -219,12 +222,12 @@ fn runSession(
         const tty_file = try session_vt.openSessionTty(io, env_map);
         errdefer if (tty_file.handle > 2) tty_file.close(io);
 
-        const session = try session_mod.start(PamCtx, allocator, io, env_map, user_z, info, pam, session_envmap, session_vt);
+        const session = try session_mod.start(PamCtx, allocator, io, control, env_map, user_z, info, pam, session_envmap, session_vt);
         break :blk .{ .session = session, .tty_file = tty_file };
     };
     defer if (started.tty_file.handle > 2) started.tty_file.close(io);
     defer started.session.deinit(io);
 
     log.debug("Waiting for session to end...", .{});
-    try signals.waitForChild(io, &started.session.child);
+    try control.wait(&started.session.child, .session);
 }

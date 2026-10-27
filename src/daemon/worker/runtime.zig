@@ -5,6 +5,7 @@ const autologin = @import("runtime/autologin.zig");
 const greeter = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
+const Connection = @import("../Shutdown/Connection.zig");
 const ProcessContext = @import("../../ProcessContext.zig");
 const Vt = @import("vt").Vt;
 const SessionClass = @import("process.zig").SessionClass;
@@ -39,6 +40,9 @@ pub fn parseArgs(args: std.process.Args) !?Options {
 
 pub fn run(process: ProcessContext, opts: Options) !void {
     signals.installHandlers();
+    const control_fd = try std.fmt.parseInt(std.posix.fd_t, process.environ_map.get("ZGSLD_CONTROL") orelse return error.MissingControlFd, 10);
+    var control = try Connection.init(process.io, .{ .handle = control_fd, .flags = .{ .nonblocking = false } });
+    defer control.deinit();
 
     const vt = try Vt.parse(process.environ_map.get("ZGSLD_VT"));
 
@@ -52,6 +56,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             try greeter.run(.{
                 .allocator = process.gpa,
                 .io = process.io,
+                .control = &control,
                 .env_map = process.environ_map,
                 .service_name = opts.service_name,
                 .username = opts.greeter_username.?,
@@ -72,6 +77,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             try login.run(.{
                 .allocator = process.gpa,
                 .io = process.io,
+                .control = &control,
                 .env_map = process.environ_map,
                 .service_name = opts.service_name,
                 .ipc_conn = &ipc_conn,
@@ -89,6 +95,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             try autologin.run(.{
                 .allocator = process.gpa,
                 .io = process.io,
+                .control = &control,
                 .env_map = process.environ_map,
                 .service_name = opts.service_name,
                 .user = autologin_user_z,

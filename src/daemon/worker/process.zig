@@ -16,6 +16,7 @@ pub const SpawnOpts = struct {
     config: Config,
     session_class: SessionClass,
     ipc_file: ?std.Io.File,
+    control_file: std.Io.File,
 };
 
 pub fn spawn(opts: SpawnOpts) !std.process.Child {
@@ -54,6 +55,9 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
         try worker_envmap.put("ZGSLD_SOCK", zgsld_sock);
     }
 
+    var control_buf: [16]u8 = undefined;
+    try worker_envmap.put("ZGSLD_CONTROL", try std.fmt.bufPrint(&control_buf, "{d}", .{opts.control_file.handle}));
+
     switch (opts.session_class) {
         .greeter => {
             const greeter_cmd = opts.config.greeter.command orelse return error.NullGreeterCmd;
@@ -90,7 +94,7 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
     return std.process.spawn(opts.io, .{
         .argv = if (opts.session_class == .greeter) &argv else argv[0..4],
         .environ_map = &worker_envmap,
-        .inherit_files = if (opts.ipc_file) |file| &.{file} else &.{},
+        .inherit_files = if (opts.ipc_file) |file| &.{ file, opts.control_file } else &.{opts.control_file},
     });
 }
 
