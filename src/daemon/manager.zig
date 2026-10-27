@@ -87,7 +87,7 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             shutdown.stop(spawned.session);
         }
 
-        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, &shutdown, spawned.greeter, opts.ipc_codec);
+        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, &shutdown, spawned.greeter, spawned.session, opts.ipc_codec);
         try waitWorker(&shutdown, spawned.greeter);
         try waitWorker(&shutdown, spawned.session);
     }
@@ -199,8 +199,15 @@ fn forwardIpc(
     worker_file: std.Io.File,
     shutdown: *Shutdown,
     greeter_worker_proc: *Shutdown.Worker,
+    session_worker_proc: *Shutdown.Worker,
     ipc_codec: ipc.Codec,
 ) !void {
+    // A completed handoff has already reaped the greeter. Otherwise both
+    // workers belong to the aborted login attempt.
+    defer if (greeter_worker_proc.process.id != null) {
+        shutdown.requestStop(greeter_worker_proc, 0);
+        shutdown.requestStop(session_worker_proc, 0);
+    };
     var greeter_conn = ipc.Connection.init(greeter_file, .{ .codec = ipc_codec });
     defer greeter_conn.deinit(io);
     var worker_conn = ipc.Connection.init(worker_file, .{});
