@@ -12,7 +12,7 @@ const SessionClass = @import("process.zig").SessionClass;
 
 pub const Options = struct {
     session_class: SessionClass,
-    service_name: []const u8,
+    service_name: [:0]const u8,
     greeter_username: ?[:0]const u8 = null,
 };
 

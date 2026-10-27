@@ -18,8 +18,8 @@
 
         // Lib Dependencies
         .zig_pam = .{
-            .url = "git+https://github.com/ashametrine/zig-pam#621ab029084f0401d06caa57928fecb378720cc1",
-            .hash = "zig_pam-0.2.0--cHVhiJbAADmwXTlw4tcdJLwmJlRW3Ejv1R1w_wpeGWt",
+            .url = "git+https://github.com/ashametrine/zig-pam#ffabe4f4c29b3a90cdaf4da06d58a769d848b7b2",
+            .hash = "zig_pam-0.2.1--cHVhn1gAADO09jEZGlPv4IdJdLlu6OCbQBwHteSzzZU",
             .lazy = true,
         },
     },

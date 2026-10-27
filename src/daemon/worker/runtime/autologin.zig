@@ -10,7 +10,7 @@ pub const RunOpts = struct {
     io: std.Io,
     control: *Connection,
     env_map: *const std.process.Environ.Map,
-    service_name: []const u8,
+    service_name: [:0]const u8,
     user: [:0]const u8,
     info: ipc.SessionInfo,
     vt: Vt,

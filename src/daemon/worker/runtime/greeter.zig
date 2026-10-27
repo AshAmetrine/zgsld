@@ -15,7 +15,7 @@ pub const RunOpts = struct {
     control: *Connection,
     env_map: *const std.process.Environ.Map,
     username: [:0]const u8,
-    service_name: []const u8,
+    service_name: [:0]const u8,
     ipc_fd: std.posix.fd_t,
     command: []const u8,
     session_type: ipc.SessionType,

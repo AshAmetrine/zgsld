@@ -14,10 +14,10 @@
     "url": "git+https://github.com/ziglibs/ini#10cfba648f709588ab2f8785f56641024c510df9",
     "hash": "sha256-TtnGZjqT6ulpI6osAJ/LcAcC4brajEK3UqUuGcsacrI="
   },
-  "zig_pam-0.2.0--cHVhiJbAADmwXTlw4tcdJLwmJlRW3Ejv1R1w_wpeGWt": {
+  "zig_pam-0.2.1--cHVhn1gAADO09jEZGlPv4IdJdLlu6OCbQBwHteSzzZU": {
     "name": "zig_pam",
-    "url": "git+https://github.com/ashametrine/zig-pam#621ab029084f0401d06caa57928fecb378720cc1",
-    "hash": "sha256-oU1YnT1oWXjbS81pqniWkvlg4aSZhT6HFvCBsaNiSx4="
+    "url": "git+https://github.com/ashametrine/zig-pam#ffabe4f4c29b3a90cdaf4da06d58a769d848b7b2",
+    "hash": "sha256-k9j6GtwwuYkzNabC8DQOK0/f1CadiKxF26dS2zO/S8E="
   },
   "translate_c-2.0.1-Q_BUWmpOBwCIhy--up1q6cl3OlIQE86iJU8R-bZ01aPj": {
     "name": "translate_c",
