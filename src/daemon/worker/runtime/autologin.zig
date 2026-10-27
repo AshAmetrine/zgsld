@@ -31,15 +31,17 @@ pub fn run(opts: RunOpts) !void {
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 
-    var session_envmap = std.process.Environ.Map.init(opts.allocator);
-    defer session_envmap.deinit();
-    if (opts.info.session_type == .x11) {
-        try session_envmap.put("XDG_SESSION_TYPE", "x11");
-    }
     var tty_file = try session_vt.openSessionTty(opts.io, opts.env_map);
     defer if (tty_file.handle > 2) tty_file.close(opts.io);
 
-    var session = try session_mod.start(void, opts.allocator, opts.io, opts.env_map, opts.user, opts.info, &pam, &session_envmap, session_vt);
+    var session = blk: {
+        var session_envmap = std.process.Environ.Map.init(opts.allocator);
+        defer session_envmap.deinit();
+        if (opts.info.session_type == .x11) {
+            try session_envmap.put("XDG_SESSION_TYPE", "x11");
+        }
+        break :blk try session_mod.start(void, opts.allocator, opts.io, opts.env_map, opts.user, opts.info, &pam, &session_envmap, session_vt);
+    };
     defer session.deinit(opts.io);
 
     try signals.waitForChild(opts.io, &session.child);
