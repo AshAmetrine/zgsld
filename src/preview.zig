@@ -106,6 +106,7 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
         switch (event) {
             .login_cancel => {
                 authenticated = false;
+                try sendEvent(ctx, io_writer, &.login_cancelled);
             },
             .pam_start_auth => |auth| {
                 if (authenticated) {
@@ -113,6 +114,7 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
                 }
                 const state = try runAuthSequence(ctx, auth.user, io_reader, io_writer, &event_buf);
                 authenticated = state == .ok;
+                if (state == .cancelled) try sendEvent(ctx, io_writer, &.login_cancelled);
             },
             .set_session_env => {
                 if (!authenticated) return error.UnexpectedPreviewEvent;

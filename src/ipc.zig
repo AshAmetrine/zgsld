@@ -99,6 +99,7 @@ pub const Event = union(enum) {
     set_session_env: SessionEnvVar,
     err: ErrorInfo,
     session_accepted: void,
+    login_cancelled: void,
 };
 
 pub const Codec = struct {

@@ -162,7 +162,17 @@ To request a session to start, the greeter must send the `start_session` event w
 
 #### Cancellation
 
-To cancel during PAM authentication or before requesting a session, the greeter can send the `login_cancel` event. The greeter can then start a new authentication attempt with `pam_start_auth`.
+To cancel during PAM authentication or before requesting a session, the greeter can send the `login_cancel` event.
+
+##### ZGSLD Response
+
+- `login_cancelled`
+
+  ZGSLD sends this event once cancellation and cleanup have finished.
+  The greeter should ignore other events while waiting for this response, 
+  then start a new attempt with `pam_start_auth`.
+
+  After `session_accepted`, the greeter should exit instead of cancelling.
 
 ### Custom Codecs
 

@@ -51,7 +51,14 @@ pub fn readEvent(_: ?*anyopaque, io_reader: *std.Io.Reader, event_buf: []u8) !Ev
                 .user = event_buf[0..payload_len :0],
             },
         },
-        .login_cancel => .login_cancel,
+        .login_cancel => blk: {
+            if (payload_len != 0) return error.InvalidPayload;
+            break :blk .login_cancel;
+        },
+        .login_cancelled => blk: {
+            if (payload_len != 0) return error.InvalidPayload;
+            break :blk .login_cancelled;
+        },
         .session_accepted => blk: {
             if (payload_len != 0) return error.InvalidPayload;
             break :blk .session_accepted;
@@ -123,6 +130,9 @@ pub fn writeEvent(_: ?*anyopaque, io_writer: *std.Io.Writer, event: *const Event
         },
         .login_cancel => {
             try writeHeader(io_writer, .login_cancel, 0);
+        },
+        .login_cancelled => {
+            try writeHeader(io_writer, .login_cancelled, 0);
         },
         .session_accepted => {
             try writeHeader(io_writer, .session_accepted, 0);

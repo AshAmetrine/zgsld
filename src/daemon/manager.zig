@@ -330,7 +330,7 @@ fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
         defer ctx.mutex.unlock(ctx.io);
         switch (event) {
             .pam_auth_result => |result| ctx.authenticated = result.ok,
-            .err => ctx.authenticated = false,
+            .err, .login_cancelled => ctx.authenticated = false,
             else => {},
         }
         try ctx.sendEvent(event);

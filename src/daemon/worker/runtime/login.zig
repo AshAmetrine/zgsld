@@ -46,8 +46,15 @@ pub fn run(opts: RunOpts) !void {
     var writer_impl = opts.ipc_conn.writer(opts.io, &wbuf);
     const ipc_reader = &reader_impl.interface;
     const ipc_writer = &writer_impl.interface;
+    var cancelled = false;
 
     while (true) {
+        // Confirm cleanup has finished after login_cancel.
+        if (cancelled) {
+            try opts.ipc_conn.writeEvent(ipc_writer, &.login_cancelled);
+            try ipc_writer.flush();
+            cancelled = false;
+        }
         log.debug("Waiting for event", .{});
         const event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
             if (err == error.EndOfStream and !saw_auth) {
@@ -59,6 +66,7 @@ pub fn run(opts: RunOpts) !void {
         switch (event) {
             .login_cancel => {
                 log.debug("Login cancelled before auth start", .{});
+                cancelled = true;
                 continue;
             },
             .pam_start_auth => |auth| {
@@ -103,7 +111,10 @@ pub fn run(opts: RunOpts) !void {
                 };
 
                 authenticate(&pam, &pam_ctx) catch |err| switch (err) {
-                    error.AuthCancelled => continue,
+                    error.AuthCancelled => {
+                        cancelled = true;
+                        continue;
+                    },
                     error.ConversationFailed => {
                         const conv_err = pam_ctx.conv_error.?;
                         if (conv_err != error.OutOfMemory) return conv_err;
@@ -133,7 +144,10 @@ pub fn run(opts: RunOpts) !void {
                     opts.ipc_conn,
                     ipc_reader,
                     &event_buf,
-                ) orelse continue;
+                ) orelse {
+                    cancelled = true;
+                    continue;
+                };
                 if (signals.shutdownRequested()) {
                     session_setup.env.deinit();
                     return;
