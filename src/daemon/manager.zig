@@ -97,7 +97,12 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             opts.ipc_codec,
         );
         try waitWorker(&shutdown, spawned.greeter);
-        try waitWorker(&shutdown, spawned.session);
+        waitWorker(&shutdown, spawned.session) catch |err| switch (err) {
+            error.WorkerError => {
+                log.err("Session worker failed; returning to greeter", .{});
+            },
+            else => return err,
+        };
     }
 }
 
