@@ -1,11 +1,4 @@
 //! IPC events, connections and pluggable codecs for greeters and zgsld.
-//!
-//! Protocol flow:
-//! 1. greeter sends `pam_start_auth`
-//! 2. zgsld sends `pam_message`/`pam_request`
-//! 3. greeter sends `pam_response` for each `pam_request`
-//! 4. zgsld sends `pam_auth_result`
-//! 5. greeter sends `set_session_env` + `start_session`
 
 const std = @import("std");
 const Binary = @import("ipc/binary.zig");
@@ -80,12 +73,14 @@ pub const PamAuthResult = struct {
     ok: bool,
 };
 
+/// An error reported by ZGSLD to the greeter.
 pub const ErrorInfo = struct {
     code: Code,
     message: []const u8 = "",
 
     pub const max_message_len = event_buf_size - 2;
     pub const Code = enum {
+        /// Session request failed validation.
         invalid_request,
         internal_error,
     };

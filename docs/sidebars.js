@@ -10,6 +10,14 @@ module.exports = {
         'configuration',
       ],
     },
-    'greeter-development',
+    {
+      type: 'category',
+      label: 'Greeter Development',
+      collapsed: false,
+      items: [
+        'greeter-development/setup',
+        'greeter-development/api',
+      ],
+    },
   ],
 };

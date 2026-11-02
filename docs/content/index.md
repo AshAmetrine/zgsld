@@ -6,7 +6,7 @@ slug: /
 
 ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greeters, handling PAM authentication through IPC, and launching a session.
 
-Greeters are made by using the provided Zig module, which supports embedding ZGSLD functionality, so greeters do not have to depend on the `zgsld` executable. If you would like to find out more about developing a greeter with ZGSLD, refer to the [Greeter Development](greeter-development.md) section.
+Greeters are made by using the provided Zig module, which supports embedding ZGSLD functionality, so greeters do not have to depend on the `zgsld` executable. If you would like to find out more about developing a greeter with ZGSLD, refer to the [Greeter Development](greeter-development/setup.md) section.
 
 ## Features
 
