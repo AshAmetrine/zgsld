@@ -56,7 +56,7 @@ pub fn run(opts: RunOpts) !void {
             cancelled = false;
         }
         log.debug("Waiting for event", .{});
-        const event = opts.ipc_conn.readEvent(ipc_reader, &event_buf) catch |err| {
+        const event = opts.ipc_conn.readEvent(ipc_reader, ipc_writer, &event_buf) catch |err| {
             if (err == error.EndOfStream and !saw_auth) {
                 if (signals.shutdownRequested()) return;
                 std.process.exit(2);
@@ -143,6 +143,7 @@ pub fn run(opts: RunOpts) !void {
                     opts.allocator,
                     opts.ipc_conn,
                     ipc_reader,
+                    ipc_writer,
                     &event_buf,
                 ) orelse {
                     cancelled = true;
@@ -206,13 +207,14 @@ fn getSession(
     allocator: std.mem.Allocator,
     ipc_conn: *ipc.Connection,
     ipc_reader: *std.Io.Reader,
+    ipc_writer: *std.Io.Writer,
     event_buf: *[ipc.event_buf_size]u8,
 ) !?SessionSetup {
     var session_envmap = std.process.Environ.Map.init(allocator);
     errdefer session_envmap.deinit();
 
     while (true) {
-        const session_event = ipc_conn.readEvent(ipc_reader, event_buf) catch |err| {
+        const session_event = ipc_conn.readEvent(ipc_reader, ipc_writer, event_buf) catch |err| {
             if (err == error.EndOfStream and signals.shutdownRequested()) {
                 std.process.exit(0);
             }

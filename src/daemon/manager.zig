@@ -35,6 +35,38 @@ const ForwardIpcCtx = struct {
     }
 };
 
+/// Prevents forwarded events from interrupting codec replies before they're flushed
+const ReplyWriter = struct {
+    writer: std.Io.Writer = .{
+        .vtable = &.{ .drain = drain, .flush = flush },
+        .buffer = &.{},
+    },
+    ctx: *ForwardIpcCtx,
+    locked: bool = false,
+
+    fn unlock(self: *ReplyWriter) void {
+        if (!self.locked) return;
+        self.locked = false;
+        self.ctx.mutex.unlock(self.ctx.io);
+    }
+
+    fn drain(writer: *std.Io.Writer, data: []const []const u8, splat: usize) !usize {
+        const self: *ReplyWriter = @fieldParentPtr("writer", writer);
+        if (!self.locked) {
+            self.ctx.mutex.lockUncancelable(self.ctx.io);
+            self.locked = true;
+        }
+        return self.ctx.writer.writeSplat(data, splat);
+    }
+
+    fn flush(writer: *std.Io.Writer) !void {
+        const self: *ReplyWriter = @fieldParentPtr("writer", writer);
+        if (!self.locked) return;
+        defer self.unlock();
+        try self.ctx.writer.flush();
+    }
+};
+
 const SpawnedWorkers = struct {
     session: *Shutdown.Worker,
     greeter: *Shutdown.Worker,
@@ -260,9 +292,14 @@ fn forwardIpc(
         var writer = worker_conn.writer(io, &wbuf);
         const io_reader = &reader.interface;
         const io_writer = &writer.interface;
+        var replies = ReplyWriter{ .ctx = &worker_to_greeter };
 
         while (true) {
-            const event = greeter_conn.readEvent(io_reader, &event_buf) catch |err| switch (err) {
+            const read_result = blk: {
+                defer replies.unlock();
+                break :blk greeter_conn.readEvent(io_reader, &replies.writer, &event_buf);
+            };
+            const event = read_result catch |err| switch (err) {
                 error.EndOfStream => break,
                 else => return err,
             };
@@ -316,12 +353,15 @@ fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
 fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     var rbuf: [ipc.event_buf_size]u8 = undefined;
+    var wbuf: [ipc.event_buf_size]u8 = undefined;
 
     var reader = ctx.src.reader(ctx.io, &rbuf);
+    var writer = ctx.src.writer(ctx.io, &wbuf);
     const io_reader = &reader.interface;
+    const io_writer = &writer.interface;
 
     while (true) {
-        const event = ctx.src.readEvent(io_reader, &event_buf) catch |err| switch (err) {
+        const event = ctx.src.readEvent(io_reader, io_writer, &event_buf) catch |err| switch (err) {
             error.EndOfStream => return,
             else => return err,
         };

@@ -32,7 +32,12 @@ fn writeHeader(io_writer: *std.Io.Writer, tag: EventType, payload_len: u32) !voi
 ///
 /// Returned string/slice fields borrow from `event_buf` and are valid only
 /// until the next `readEvent` call that reuses that buffer.
-pub fn readEvent(_: ?*anyopaque, io_reader: *std.Io.Reader, event_buf: []u8) !Event {
+pub fn readEvent(
+    _: ?*anyopaque,
+    io_reader: *std.Io.Reader,
+    _: *std.Io.Writer,
+    event_buf: []u8,
+) !Event {
     const header = try readHeader(io_reader);
 
     const payload_len = header.payload_len;

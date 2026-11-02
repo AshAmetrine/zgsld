@@ -98,7 +98,8 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
     const io_writer = &writer.interface;
 
     while (true) {
-        const event = ctx.conn.readEvent(io_reader, &event_buf) catch |err| switch (err) {
+        const read_result = ctx.conn.readEvent(io_reader, io_writer, &event_buf);
+        const event = read_result catch |err| switch (err) {
             error.EndOfStream => return,
             else => return err,
         };
@@ -198,7 +199,7 @@ fn runSteps(
             .pam_challenge => |challenge| {
                 try sendEvent(ctx, io_writer, &.{ .pam_request = challenge.request });
 
-                const response = try ctx.conn.readEvent(io_reader, event_buf);
+                const response = try ctx.conn.readEvent(io_reader, io_writer, event_buf);
                 switch (response) {
                     .pam_response => |resp| {
                         const response_matches = switch (challenge.expected_response) {

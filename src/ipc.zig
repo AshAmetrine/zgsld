@@ -107,7 +107,7 @@ pub const Codec = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        readEvent: *const fn (?*anyopaque, *std.Io.Reader, []u8) anyerror!Event,
+        readEvent: *const fn (?*anyopaque, *std.Io.Reader, *std.Io.Writer, []u8) anyerror!Event,
         writeEvent: *const fn (?*anyopaque, *std.Io.Writer, *const Event) anyerror!void,
     };
 
@@ -116,8 +116,15 @@ pub const Codec = struct {
         .writeEvent = Binary.writeEvent,
     } };
 
-    pub fn readEvent(self: Codec, reader: *std.Io.Reader, event_buf: []u8) !Event {
-        return self.vtable.readEvent(self.context, reader, event_buf);
+    /// Reads an event. The codec can use the writer to send protocol replies.
+    /// Any replies must be flushed before reading more data or returning an event.
+    pub fn readEvent(
+        self: Codec,
+        reader: *std.Io.Reader,
+        writer: *std.Io.Writer,
+        event_buf: []u8,
+    ) !Event {
+        return self.vtable.readEvent(self.context, reader, writer, event_buf);
     }
 
     pub fn writeEvent(self: Codec, writer: *std.Io.Writer, event: *const Event) !void {
@@ -156,8 +163,14 @@ pub const Connection = struct {
         return self.file.writer(io, buffer);
     }
 
-    pub fn readEvent(self: *Self, io_reader: *std.Io.Reader, event_buf: []u8) !Event {
-        return self.codec.readEvent(io_reader, event_buf);
+    /// Reads an event using a reader and writer for this connection.
+    pub fn readEvent(
+        self: *Self,
+        io_reader: *std.Io.Reader,
+        io_writer: *std.Io.Writer,
+        event_buf: []u8,
+    ) !Event {
+        return self.codec.readEvent(io_reader, io_writer, event_buf);
     }
 
     pub fn writeEvent(self: *Self, io_writer: *std.Io.Writer, event: *const Event) !void {

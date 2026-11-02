@@ -180,6 +180,9 @@ This library supports replacing the default IPC codec by implementing `readEvent
 
 If you are building your greeter without the daemon built-in, then your codec must match whichever daemon runs it. The standard `zgsld` executable uses the built-in binary codec. 
 
+`readEvent` receives a reader and writer for the same connection, allowing codecs to send protocol replies while decoding events.
+The codec must flush these replies before reading further input or returning an event.
+
 #### Example
 
 In the following example, `readEvent` and `writeEvent` delegate to the built-in binary codec. For a custom codec, replace them with your own decoding/encoding implementations.
@@ -199,9 +202,10 @@ const my_codec: ipc.Codec = .{
 fn readEvent(
     _: ?*anyopaque,
     reader: *std.Io.Reader,
+    writer: *std.Io.Writer,
     event_buf: []u8,
 ) !ipc.Event {
-    return ipc.Codec.binary.readEvent(reader, event_buf);
+    return ipc.Codec.binary.readEvent(reader, writer, event_buf);
 }
 
 fn writeEvent(

@@ -42,7 +42,7 @@ fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
                 });
                 try ipc_writer.flush();
 
-                const event = try ctx.ipc_conn.readEvent(ipc_reader, &ipc_buf);
+                const event = try ctx.ipc_conn.readEvent(ipc_reader, ipc_writer, &ipc_buf);
                 switch (event) {
                     .pam_response => |resp_bytes| {
                         try m.respond(resp_bytes);
