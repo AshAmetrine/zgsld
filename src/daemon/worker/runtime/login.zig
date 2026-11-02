@@ -89,7 +89,11 @@ pub fn run(opts: RunOpts) !void {
                 defer pam.deinit();
 
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const tty_path = opts.vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf) catch |err| {
+                const tty_path = opts.vt.resolveTtyDevicePath(
+                    opts.io,
+                    opts.env_map,
+                    &tty_path_buf,
+                ) catch |err| {
                     try reportInternalError(&pam_ctx, err);
                     continue;
                 };
@@ -124,14 +128,29 @@ pub fn run(opts: RunOpts) !void {
                 };
                 try writeAuthResult(&pam_ctx, true);
 
-                var session_setup = try getSession(opts.allocator, opts.ipc_conn, ipc_reader, &event_buf) orelse continue;
+                var session_setup = try getSession(
+                    opts.allocator,
+                    opts.ipc_conn,
+                    ipc_reader,
+                    &event_buf,
+                ) orelse continue;
                 if (signals.shutdownRequested()) {
                     session_setup.env.deinit();
                     return;
                 }
                 opts.ipc_conn.deinit(opts.io);
                 ipc_closed = true;
-                try runSession(opts.allocator, opts.io, opts.control, opts.env_map, user_z, session_setup.info, &pam, &session_setup.env, opts.vt);
+                try runSession(
+                    opts.allocator,
+                    opts.io,
+                    opts.control,
+                    opts.env_map,
+                    user_z,
+                    session_setup.info,
+                    &pam,
+                    &session_setup.env,
+                    opts.vt,
+                );
                 return;
             },
             else => return error.UnexpectedEvent,
@@ -142,7 +161,9 @@ pub fn run(opts: RunOpts) !void {
 fn authenticate(pam: *Pam(PamCtx), ctx: *PamCtx) !void {
     try checkPamResult(ctx, pam.authenticate(.{}));
     checkPamResult(ctx, pam.accountMgmt(.{})) catch |err| switch (err) {
-        error.NewAuthTokenRequired => try checkPamResult(ctx, pam.changeAuthToken(.{ .change_expired_authtok = true })),
+        error.NewAuthTokenRequired => {
+            try checkPamResult(ctx, pam.changeAuthToken(.{ .change_expired_authtok = true }));
+        },
         else => return err,
     };
     try checkPamResult(ctx, pam.setCred(.{ .action = .establish }));
@@ -222,7 +243,18 @@ fn runSession(
         const tty_file = try session_vt.openSessionTty(io, env_map);
         errdefer if (tty_file.handle > 2) tty_file.close(io);
 
-        const session = try session_mod.start(PamCtx, allocator, io, control, env_map, user_z, info, pam, session_envmap, session_vt);
+        const session = try session_mod.start(
+            PamCtx,
+            allocator,
+            io,
+            control,
+            env_map,
+            user_z,
+            info,
+            pam,
+            session_envmap,
+            session_vt,
+        );
         break :blk .{ .session = session, .tty_file = tty_file };
     };
     defer if (started.tty_file.handle > 2) started.tty_file.close(io);

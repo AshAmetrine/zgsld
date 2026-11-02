@@ -76,8 +76,11 @@ pub fn readEvent(_: ?*anyopaque, io_reader: *std.Io.Reader, event_buf: []u8) !Ev
         },
         .pam_response => .{ .pam_response = payload },
         .err => blk: {
-            if (payload_len < 1 or payload_len > ipc.ErrorInfo.max_message_len + 1) return error.InvalidPayload;
-            const code = std.enums.fromInt(ipc.ErrorInfo.Code, payload[0]) orelse return error.InvalidPayload;
+            if (payload_len < 1 or payload_len > ipc.ErrorInfo.max_message_len + 1) {
+                return error.InvalidPayload;
+            }
+            const code = std.enums.fromInt(ipc.ErrorInfo.Code, payload[0]) orelse
+                return error.InvalidPayload;
             break :blk .{ .err = .{ .code = code, .message = payload[1..] } };
         },
         .pam_auth_result => blk: {

@@ -13,7 +13,8 @@ const packet_size = 2 + @sizeOf(std.posix.pid_t);
 
 pub fn socketPair() !SocketPair {
     var fds: [2]std.posix.fd_t = undefined;
-    const rc = std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.SEQPACKET | std.posix.SOCK.CLOEXEC, 0, &fds);
+    const socket_type = std.posix.SOCK.SEQPACKET | std.posix.SOCK.CLOEXEC;
+    const rc = std.c.socketpair(std.posix.AF.UNIX, socket_type, 0, &fds);
     if (rc != 0) return std.posix.unexpectedErrno(std.c.errno(rc));
     return .{
         .parent = .{ .handle = fds[0], .flags = .{ .nonblocking = false } },
@@ -37,7 +38,12 @@ pub fn send(fd: std.posix.fd_t, packet: Packet) !void {
     bytes[1] = @backingInt(packet.role);
     std.mem.writeInt(std.posix.pid_t, bytes[2..], packet.pid, .little);
     while (true) {
-        const rc = std.c.send(fd, &bytes, bytes.len, std.posix.MSG.NOSIGNAL | std.posix.MSG.DONTWAIT);
+        const rc = std.c.send(
+            fd,
+            &bytes,
+            bytes.len,
+            std.posix.MSG.NOSIGNAL | std.posix.MSG.DONTWAIT,
+        );
         if (rc == bytes.len) return;
         if (rc < 0 and std.c.errno(rc) == .INTR) continue;
         return error.ControlSendFailed;
@@ -46,8 +52,9 @@ pub fn send(fd: std.posix.fd_t, packet: Packet) !void {
 
 pub fn receive(fd: std.posix.fd_t, nonblocking: bool) !?Packet {
     var bytes: [packet_size + 1]u8 = undefined;
+    const flags: c_int = if (nonblocking) std.posix.MSG.DONTWAIT else 0;
     const count = while (true) {
-        const rc = std.c.recv(fd, &bytes, bytes.len, @as(c_int, if (nonblocking) std.posix.MSG.DONTWAIT else 0));
+        const rc = std.c.recv(fd, &bytes, bytes.len, flags);
         if (rc >= 0) break rc;
         switch (std.c.errno(rc)) {
             .INTR => continue,
@@ -61,7 +68,8 @@ pub fn receive(fd: std.posix.fd_t, nonblocking: bool) !?Packet {
     const message = std.enums.fromInt(Message, bytes[0]) orelse return error.InvalidControlMessage;
     const role = std.enums.fromInt(Role, bytes[1]) orelse return error.InvalidControlMessage;
     const pid = std.mem.readInt(std.posix.pid_t, bytes[2..packet_size], .little);
-    if (if (message == .register) pid <= 0 else pid != 0) return error.InvalidControlMessage;
+    const valid_pid = if (message == .register) pid > 0 else pid == 0;
+    if (!valid_pid) return error.InvalidControlMessage;
     return .{ .message = message, .role = role, .pid = pid };
 }
 

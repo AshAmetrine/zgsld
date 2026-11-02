@@ -30,7 +30,14 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
     try opts.envmap.put("DISPLAY", display);
 
     var xauth_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const xauth_path = try xauth.createXauthEntry(opts.io, &xauth_buf, display[1..], opts.user.uid, opts.user.gid, opts.envmap.get("XDG_RUNTIME_DIR"));
+    const xauth_path = try xauth.createXauthEntry(
+        opts.io,
+        &xauth_buf,
+        display[1..],
+        opts.user.uid,
+        opts.user.gid,
+        opts.envmap.get("XDG_RUNTIME_DIR"),
+    );
     errdefer std.Io.Dir.deleteFileAbsolute(opts.io, xauth_path) catch {};
     const xauth_path_z = try allocator.dupeSentinel(u8, xauth_path, 0);
     errdefer allocator.free(xauth_path_z);
@@ -47,12 +54,23 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
     else
         null;
 
-    const shell_cmd_z = try std.fmt.allocPrintSentinel(startup_allocator, "exec {s} \"$@\"", .{opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X"}, 0);
+    const x_cmd = opts.host_env_map.get("ZGSLD_X11_CMD") orelse "/bin/X";
+    const shell_cmd_z = try std.fmt.allocPrintSentinel(
+        startup_allocator,
+        "exec {s} \"$@\"",
+        .{x_cmd},
+        0,
+    );
 
     var ready = try DisplayPipe.init();
     defer ready.deinit(opts.io);
     var display_fd_buf: [16]u8 = undefined;
-    const display_fd = try std.fmt.bufPrintSentinel(&display_fd_buf, "{d}", .{ready.write_file.?.handle}, 0);
+    const display_fd = try std.fmt.bufPrintSentinel(
+        &display_fd_buf,
+        "{d}",
+        .{ready.write_file.?.handle},
+        0,
+    );
 
     const argv = [_:null]?[*:0]const u8{
         "/bin/sh",
@@ -84,14 +102,7 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
 
     ready.closeWriter(opts.io);
 
-    var server: std.process.Child = .{
-        .id = pid,
-        .thread_handle = {},
-        .stdin = null,
-        .stdout = null,
-        .stderr = null,
-        .request_resource_usage_statistics = false,
-    };
+    var server = Connection.childFromPid(pid);
     errdefer opts.control.stop(&server, .x11);
 
     const ready_result = ready.wait(opts.io, display_num, 5000);
@@ -101,7 +112,12 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
         return error.XServerExited;
     }
     try ready_result;
-    return .{ .child = server, .control = opts.control, .xauth_path = xauth_path_z, .allocator = allocator };
+    return .{
+        .child = server,
+        .control = opts.control,
+        .xauth_path = xauth_path_z,
+        .allocator = allocator,
+    };
 }
 
 pub fn deinit(self: *XServer, io: std.Io) void {

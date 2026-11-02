@@ -4,6 +4,8 @@ const Shutdown = @This();
 const fd_utils = @import("../fd.zig");
 const log = std.log.scoped(.zgsld);
 const handled_signals = [_]std.posix.SIG{ .TERM, .INT, .HUP, .QUIT, .ALRM };
+const term_seconds: c_uint = 5;
+const cleanup_seconds: c_uint = 10;
 
 var wake_fd = std.atomic.Value(std.posix.fd_t).init(-1);
 var shutdown_requested = std.atomic.Value(bool).init(false);
@@ -16,13 +18,15 @@ mutex: std.Io.Mutex = .init,
 thread: ?std.Thread = null,
 stopped: bool = false,
 workers: [2]Worker = .{ .{}, .{} },
-options: Options,
 
-pub const Options = struct {
-    term_seconds: c_uint = 5,
-    cleanup_seconds: c_uint = 10,
+const Phase = union(enum) {
+    running,
+    grace,
+    term: Connection.Role,
+    kill: Connection.Role,
+    cleanup,
+    killed,
 };
-const Phase = union(enum) { running, grace, term: Connection.Role, kill: Connection.Role, cleanup, killed };
 
 pub const Worker = struct {
     process: std.process.Child = undefined,
@@ -48,10 +52,12 @@ pub const Worker = struct {
     fn stopChild(self: *Worker, control: *Shutdown, role: Connection.Role) void {
         if (self.pids[@backingInt(role)] != null) {
             self.signal(role, .TERM);
-            self.arm(control, .{ .term = role }, control.options.term_seconds);
-        } else switch (role) {
+            self.arm(control, .{ .term = role }, term_seconds);
+            return;
+        }
+        switch (role) {
             .session => self.stopChild(control, .x11),
-            .x11 => self.arm(control, .cleanup, control.options.cleanup_seconds),
+            .x11 => self.arm(control, .cleanup, cleanup_seconds),
         }
     }
 
@@ -99,7 +105,7 @@ pub const Worker = struct {
             .term => |role| {
                 self.forced = true;
                 self.signal(role, .KILL);
-                self.arm(control, .{ .kill = role }, control.options.cleanup_seconds);
+                self.arm(control, .{ .kill = role }, cleanup_seconds);
             },
             .kill, .cleanup => {
                 self.killChildren();
@@ -116,7 +122,7 @@ pub const Worker = struct {
         self.connected = false;
         _ = std.c.shutdown(self.socket, 2);
         self.killChildren();
-        self.arm(control, .cleanup, control.options.cleanup_seconds);
+        self.arm(control, .cleanup, cleanup_seconds);
     }
 
     fn receive(self: *Worker, control: *Shutdown, packet: Connection.Packet) !void {
@@ -126,7 +132,10 @@ pub const Worker = struct {
                 if (self.pids[index] != null) return error.DuplicateProcess;
                 self.pids[index] = packet.pid;
                 const stopping = self.phase != .running;
-                try Connection.send(self.socket, .{ .message = if (stopping) .stopping else .accepted, .role = packet.role });
+                try Connection.send(self.socket, .{
+                    .message = if (stopping) .stopping else .accepted,
+                    .role = packet.role,
+                });
                 if (stopping) self.signal(packet.role, .KILL);
             },
             .exited => {
@@ -145,11 +154,11 @@ pub const Worker = struct {
                 log.err("Worker process notification failed: {s}", .{@errorName(err)});
                 self.disconnected(control);
                 return;
-            };
-            self.receive(control, packet orelse {
+            } orelse {
                 self.disconnected(control);
                 return;
-            }) catch |err| {
+            };
+            self.receive(control, packet) catch |err| {
                 log.err("Invalid worker process notification: {s}", .{@errorName(err)});
                 self.disconnected(control);
             };
@@ -157,16 +166,19 @@ pub const Worker = struct {
     }
 };
 
-pub fn init(io: std.Io, options: Options) !Shutdown {
-    std.debug.assert(options.term_seconds > 0 and options.cleanup_seconds > 0);
+pub fn init(io: std.Io) !Shutdown {
     const pipe = try std.Io.Threaded.pipe2(.{ .CLOEXEC = true, .NONBLOCK = true });
     std.debug.assert(wake_fd.load(.seq_cst) == -1);
     shutdown_requested.store(false, .seq_cst);
     wake_fd.store(pipe[1], .seq_cst);
     var previous: [handled_signals.len]std.posix.Sigaction = undefined;
-    const action: std.posix.Sigaction = .{ .handler = .{ .handler = handleSignal }, .mask = std.posix.sigemptyset(), .flags = 0 };
+    const action: std.posix.Sigaction = .{
+        .handler = .{ .handler = handleSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
     for (handled_signals, &previous) |sig, *old| std.posix.sigaction(sig, &action, old);
-    return .{ .io = io, .wake_pipe = pipe, .previous = previous, .options = options };
+    return .{ .io = io, .wake_pipe = pipe, .previous = previous };
 }
 
 pub fn start(self: *Shutdown) !void {
@@ -174,7 +186,9 @@ pub fn start(self: *Shutdown) !void {
 }
 
 pub fn deinit(self: *Shutdown) void {
-    for (&self.workers) |*worker| if (worker.pid != null) self.requestStop(worker, 0);
+    for (&self.workers) |*worker| {
+        if (worker.pid != null) self.requestStop(worker, 0);
+    }
     for (&self.workers) |*worker| self.stop(worker);
     self.mutex.lockUncancelable(self.io);
     self.stopped = true;
@@ -183,7 +197,11 @@ pub fn deinit(self: *Shutdown) void {
     if (self.thread) |thread| thread.join();
     _ = std.c.alarm(0);
     // Discard an alarm already pending before restoring its old disposition.
-    const ignore: std.posix.Sigaction = .{ .handler = .{ .handler = std.posix.SIG.IGN }, .mask = std.posix.sigemptyset(), .flags = 0 };
+    const ignore: std.posix.Sigaction = .{
+        .handler = .{ .handler = std.posix.SIG.IGN },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
     std.posix.sigaction(.ALRM, &ignore, null);
     for (handled_signals, &self.previous) |sig, *old| std.posix.sigaction(sig, old, null);
     wake_fd.store(-1, .seq_cst);
@@ -194,19 +212,35 @@ pub fn deinit(self: *Shutdown) void {
 }
 
 // Takes ownership of the process and socket on success; duplicates the IPC file.
-pub fn addWorker(self: *Shutdown, process: std.process.Child, socket: std.Io.File, ipc: ?std.Io.File) !*Worker {
+pub fn addWorker(
+    self: *Shutdown,
+    process: std.process.Child,
+    socket: std.Io.File,
+    ipc: ?std.Io.File,
+) !*Worker {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
     for (&self.workers) |*worker| {
         if (worker.pid != null) continue;
         const ipc_fd = if (ipc) |file| blk: {
-            const fd = std.c.fcntl(file.handle, if (@hasDecl(std.posix.F, "DUPFD_CLOEXEC")) std.posix.F.DUPFD_CLOEXEC else std.posix.F.DUPFD, @as(c_int, 0));
+            const command = if (@hasDecl(std.posix.F, "DUPFD_CLOEXEC"))
+                std.posix.F.DUPFD_CLOEXEC
+            else
+                std.posix.F.DUPFD;
+            const fd = std.c.fcntl(file.handle, command, @as(c_int, 0));
             if (fd < 0) return std.posix.unexpectedErrno(std.c.errno(fd));
             errdefer _ = std.c.close(fd);
             if (!@hasDecl(std.posix.F, "DUPFD_CLOEXEC")) try fd_utils.setCloseOnExec(fd);
             break :blk fd;
         } else null;
-        worker.* = .{ .process = process, .pid = process.id.?, .socket = socket.handle, .ipc = ipc_fd, .connected = true, .generation = worker.generation +% 1 };
+        worker.* = .{
+            .process = process,
+            .pid = process.id.?,
+            .socket = socket.handle,
+            .ipc = ipc_fd,
+            .connected = true,
+            .generation = worker.generation +% 1,
+        };
         self.wake();
         return worker;
     }
@@ -268,15 +302,25 @@ fn run(self: *Shutdown) void {
         for (&self.workers, 0..) |*worker, i| {
             if (worker.pid != null) {
                 if (shutdownRequested()) worker.beginStop(self, 0);
-                if (worker.deadline) |deadline| if (now.compare(.gte, deadline)) worker.expire(self);
-                if (worker.deadline) |deadline| if (next == null or deadline.compare(.lt, next.?)) {
-                    next = deadline;
-                };
+                if (worker.deadline) |deadline| {
+                    if (now.compare(.gte, deadline)) worker.expire(self);
+                }
+                if (worker.deadline) |deadline| {
+                    if (next == null or deadline.compare(.lt, next.?)) next = deadline;
+                }
             }
-            fds[i + 1] = .{ .fd = if (worker.connected) worker.socket else -1, .events = std.c.POLL.IN, .revents = 0 };
+            fds[i + 1] = .{
+                .fd = if (worker.connected) worker.socket else -1,
+                .events = std.c.POLL.IN,
+                .revents = 0,
+            };
             generations[i] = worker.generation;
         }
-        const seconds: c_uint = if (next) |deadline| @intCast(@max(1, @divCeil(std.Io.Clock.awake.now(self.io).durationTo(deadline).toNanoseconds(), std.time.ns_per_s))) else 0;
+        const seconds: c_uint = if (next) |deadline| blk: {
+            const remaining = std.Io.Clock.awake.now(self.io).durationTo(deadline).toNanoseconds();
+            const rounded_seconds = @divCeil(remaining, std.time.ns_per_s);
+            break :blk @intCast(@max(1, rounded_seconds));
+        } else 0;
         _ = std.c.alarm(seconds);
         self.mutex.unlock(self.io);
 
@@ -285,10 +329,11 @@ fn run(self: *Shutdown) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         if (rc < 0) {
-            for (&self.workers) |*worker| if (worker.pid != null) {
+            for (&self.workers) |*worker| {
+                const pid = worker.pid orelse continue;
                 worker.killChildren();
-                std.posix.kill(worker.pid.?, .KILL) catch {};
-            };
+                std.posix.kill(pid, .KILL) catch {};
+            }
             return;
         }
         if (fds[0].revents != 0) {
@@ -296,7 +341,12 @@ fn run(self: *Shutdown) void {
             while (std.c.read(self.wake_pipe[0], &bytes, bytes.len) > 0) {}
         }
         for (&self.workers, 0..) |*worker, i| {
-            if (worker.connected and worker.generation == generations[i] and fds[i + 1].revents != 0) worker.drain(self);
+            if (worker.connected and
+                worker.generation == generations[i] and
+                fds[i + 1].revents != 0)
+            {
+                worker.drain(self);
+            }
         }
     }
 }

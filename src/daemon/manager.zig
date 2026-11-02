@@ -52,7 +52,7 @@ pub const SessionManagerRunOpts = struct {
 };
 
 pub fn run(opts: SessionManagerRunOpts) !void {
-    var shutdown = try Shutdown.init(opts.io, .{});
+    var shutdown = try Shutdown.init(opts.io);
     defer shutdown.deinit();
     try shutdown.start();
 
@@ -87,7 +87,15 @@ pub fn run(opts: SessionManagerRunOpts) !void {
             shutdown.stop(spawned.session);
         }
 
-        try forwardIpc(opts.io, spawned.greeter_file, spawned.session_file, &shutdown, spawned.greeter, spawned.session, opts.ipc_codec);
+        try forwardIpc(
+            opts.io,
+            spawned.greeter_file,
+            spawned.session_file,
+            &shutdown,
+            spawned.greeter,
+            spawned.session,
+            opts.ipc_codec,
+        );
         try waitWorker(&shutdown, spawned.greeter);
         try waitWorker(&shutdown, spawned.session);
     }
@@ -110,7 +118,12 @@ fn spawnWorkers(opts: SessionManagerRunOpts, shutdown: *Shutdown) !SpawnedWorker
     };
 }
 
-fn spawnWorker(opts: SessionManagerRunOpts, shutdown: *Shutdown, session_class: worker.process.SessionClass, ipc_socks: ?SocketPair) !*Shutdown.Worker {
+fn spawnWorker(
+    opts: SessionManagerRunOpts,
+    shutdown: *Shutdown,
+    session_class: worker.process.SessionClass,
+    ipc_socks: ?SocketPair,
+) !*Shutdown.Worker {
     defer if (ipc_socks) |socks| socks.child.close(opts.io);
     const control = try Shutdown.Connection.socketPair();
     defer control.child.close(opts.io);
@@ -222,7 +235,11 @@ fn forwardIpc(
         .writer = &reply_writer.interface,
     };
 
-    const worker_to_greeter_thread = try std.Thread.spawn(.{}, forwardIpcThread, .{&worker_to_greeter});
+    const worker_to_greeter_thread = try std.Thread.spawn(
+        .{},
+        forwardIpcThread,
+        .{&worker_to_greeter},
+    );
     {
         defer {
             _ = std.c.shutdown(greeter_conn.file.handle, 2);

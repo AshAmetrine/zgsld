@@ -60,7 +60,8 @@ pub const Session = struct {
     child: std.process.Child,
     control: *Connection,
 
-    x11: if (build_options.x11_support) ?XServer else void = if (build_options.x11_support) null else {},
+    x11: if (build_options.x11_support) ?XServer else void =
+        if (build_options.x11_support) null else {},
 
     pub fn deinit(self: *Session, io: std.Io) void {
         self.control.stop(&self.child, .session);
@@ -84,7 +85,8 @@ pub const Session = struct {
         if (!build_options.x11_support and opts.session_info.session_type == .x11) {
             return error.X11UnsupportedBuild;
         }
-        var xserver: if (build_options.x11_support) ?XServer else void = if (build_options.x11_support) null else {};
+        var xserver: if (build_options.x11_support) ?XServer else void =
+            if (build_options.x11_support) null else {};
         errdefer if (build_options.x11_support) {
             if (xserver) |*server| server.deinit(opts.io);
         };
@@ -165,13 +167,6 @@ pub const Session = struct {
             std.c._exit(1);
         }
 
-        return .{
-            .id = session_pid,
-            .thread_handle = {},
-            .stdin = null,
-            .stdout = null,
-            .stderr = null,
-            .request_resource_usage_statistics = false,
-        };
+        return Connection.childFromPid(session_pid);
     }
 };

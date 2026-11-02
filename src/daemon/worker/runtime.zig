@@ -40,8 +40,13 @@ pub fn parseArgs(args: std.process.Args) !?Options {
 
 pub fn run(process: ProcessContext, opts: Options) !void {
     signals.installHandlers();
-    const control_fd = try std.fmt.parseInt(std.posix.fd_t, process.environ_map.get("ZGSLD_CONTROL") orelse return error.MissingControlFd, 10);
-    var control = try Connection.init(process.io, .{ .handle = control_fd, .flags = .{ .nonblocking = false } });
+    const control_raw = process.environ_map.get("ZGSLD_CONTROL") orelse
+        return error.MissingControlFd;
+    const control_fd = try std.fmt.parseInt(std.posix.fd_t, control_raw, 10);
+    var control = try Connection.init(process.io, .{
+        .handle = control_fd,
+        .flags = .{ .nonblocking = false },
+    });
     defer control.deinit();
 
     const vt = try Vt.parse(process.environ_map.get("ZGSLD_VT"));

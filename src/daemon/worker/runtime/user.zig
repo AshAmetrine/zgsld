@@ -10,7 +10,12 @@ const setgroups = switch (builtin.os.tag) {
     }.setgroups,
 };
 
-extern "c" fn getgrouplist(user: [*:0]const u8, group: std.posix.gid_t, groups: ?[*]std.posix.gid_t, count: *c_int) c_int;
+extern "c" fn getgrouplist(
+    user: [*:0]const u8,
+    group: std.posix.gid_t,
+    groups: ?[*]std.posix.gid_t,
+    count: *c_int,
+) c_int;
 
 pub const UserInfo = struct {
     username: [:0]const u8,
@@ -22,8 +27,12 @@ pub fn getGroups(allocator: std.mem.Allocator, user: UserInfo) ![]std.posix.gid_
     var groups: std.ArrayList(std.posix.gid_t) = .empty;
     errdefer groups.deinit(allocator);
     var count: c_int = 0;
-    while (getgrouplist(user.username, user.gid, if (groups.capacity == 0) null else groups.items.ptr, &count) < 0) {
-        if (count <= 0 or @as(usize, @intCast(count)) <= groups.capacity) return error.GroupLookupFailed;
+    while (true) {
+        const buffer = if (groups.capacity == 0) null else groups.items.ptr;
+        if (getgrouplist(user.username, user.gid, buffer, &count) >= 0) break;
+        if (count <= 0 or @as(usize, @intCast(count)) <= groups.capacity) {
+            return error.GroupLookupFailed;
+        }
         try groups.ensureTotalCapacityPrecise(allocator, @intCast(count));
     }
     groups.items.len = @intCast(count);

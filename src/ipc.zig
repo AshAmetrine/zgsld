@@ -33,7 +33,10 @@ pub const SessionInfo = struct {
     pub fn validate(self: SessionInfo, x11_supported: bool) error{InvalidSession}!void {
         if (self.command.session_cmd.len == 0 or
             std.mem.indexOfScalar(u8, self.command.session_cmd, 0) != null or
-            (self.session_type == .x11 and !x11_supported)) return error.InvalidSession;
+            (self.session_type == .x11 and !x11_supported))
+        {
+            return error.InvalidSession;
+        }
     }
 };
 

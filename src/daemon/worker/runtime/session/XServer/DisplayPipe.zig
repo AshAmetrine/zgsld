@@ -44,19 +44,26 @@ pub fn wait(self: *const DisplayPipe, io: std.Io, display: u8, timeout_ms: u32) 
         if (signals.shutdownRequested()) return error.Shutdown;
         const remaining = std.Io.Clock.awake.now(io).durationTo(deadline).toNanoseconds();
         if (remaining <= 0) return error.XServerTimeout;
-        const rc = std.c.poll(&fds, fds.len, @intCast(@min(std.math.maxInt(c_int), @divCeil(remaining, std.time.ns_per_ms))));
+        const remaining_ms = @divCeil(remaining, std.time.ns_per_ms);
+        const poll_timeout: c_int = @intCast(@min(std.math.maxInt(c_int), remaining_ms));
+        const rc = std.c.poll(&fds, fds.len, poll_timeout);
         if (rc < 0) {
             if (std.c.errno(rc) == .INTR) continue;
             return std.posix.unexpectedErrno(std.c.errno(rc));
         }
-        if (fds[0].revents & (std.c.POLL.ERR | std.c.POLL.NVAL) != 0) return error.DisplayReadFailed;
+        if (fds[0].revents & (std.c.POLL.ERR | std.c.POLL.NVAL) != 0) {
+            return error.DisplayReadFailed;
+        }
         if (fds[0].revents & (std.c.POLL.IN | std.c.POLL.HUP) == 0) continue;
-        const count = self.read_file.readStreaming(io, &.{response[used..]}) catch |err| switch (err) {
-            error.EndOfStream => return error.InvalidDisplayResponse,
-            else => return err,
+        const count = self.read_file.readStreaming(io, &.{response[used..]}) catch |err| {
+            if (err == error.EndOfStream) return error.InvalidDisplayResponse;
+            return err;
         };
         used += count;
-        if (used > expected.len or !std.mem.eql(u8, response[0..used], expected[0..used])) return error.InvalidDisplayResponse;
+        if (used > expected.len) return error.InvalidDisplayResponse;
+        if (!std.mem.eql(u8, response[0..used], expected[0..used])) {
+            return error.InvalidDisplayResponse;
+        }
         if (used == expected.len) return;
     }
 }
