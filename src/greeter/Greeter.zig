@@ -3,7 +3,7 @@ const build_options = @import("build_options");
 const fd_utils = @import("common").fd;
 const Config = @import("common").Config;
 const ProcessContext = @import("common").ProcessContext;
-const daemon = if (build_options.standalone) @import("daemon") else void;
+const daemon = if (build_options.embed_daemon) @import("daemon") else void;
 const ipc = @import("ipc");
 const preview = @import("preview");
 const PreviewRuntime = @import("../preview/Runtime.zig");
@@ -76,7 +76,7 @@ pub fn init(process: ProcessContext, opts: Options) Self {
 }
 
 pub fn run(self: Self) !void {
-    if (build_options.standalone) {
+    if (build_options.embed_daemon) {
         if (try daemon.runWorkerIfRequested(self.process)) return;
     }
 
@@ -95,8 +95,8 @@ pub fn run(self: Self) !void {
         return;
     }
 
-    if (build_options.standalone) {
-        try self.runStandalone();
+    if (build_options.embed_daemon) {
+        try self.runDaemon();
     } else {
         log.err("Is the greeter being run by zgsld?", .{});
         return error.MissingZgsldSock;
@@ -117,8 +117,8 @@ pub fn runPreview(self: Self, opts: preview.Options) !void {
     try runtime.closeAndJoin();
 }
 
-fn runStandalone(self: Self) !void {
-    if (!build_options.standalone) unreachable;
+fn runDaemon(self: Self) !void {
+    if (!build_options.embed_daemon) unreachable;
 
     var zgsld_config = Config{};
     var configure_arena = std.heap.ArenaAllocator.init(self.process.gpa);

@@ -9,9 +9,16 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const is_top_level = b.pkg_hash.len == 0;
-    const standalone = b.option(bool, "standalone", "Build standalone greeter + session manager") orelse !is_top_level;
-    if (is_top_level and standalone) {
-        std.log.warn("zgsld: ignoring -Dstandalone=true for top-level builds (library-only option)", .{});
+    const embed_daemon = b.option(
+        bool,
+        "embed_daemon",
+        "Embed the daemon in the greeter executable",
+    ) orelse !is_top_level;
+    if (is_top_level and embed_daemon) {
+        std.log.warn(
+            "zgsld: -Dembed_daemon only affects the greeter module",
+            .{},
+        );
     }
 
     const service_name = b.option([]const u8, "service-name", "Set PAM service name") orelse "login";
@@ -22,7 +29,7 @@ pub fn build(b: *std.Build) !void {
     const x11_cmd = b.option([]const u8, "x11_cmd", "X server command (default: /bin/X)") orelse "/bin/X";
 
     const build_options = b.addOptions();
-    build_options.addOption(bool, "standalone", standalone);
+    build_options.addOption(bool, "embed_daemon", embed_daemon);
     build_options.addOption([]const u8, "version", version_str);
     build_options.addOption([]const u8, "service_name", service_name);
     build_options.addOption([]const u8, "greeter_user", greeter_user);
@@ -94,7 +101,7 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "preview", .module = preview },
         },
     });
-    if (standalone) {
+    if (embed_daemon) {
         greeter.addImport("daemon", daemon);
     }
 
