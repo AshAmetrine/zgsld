@@ -2,103 +2,38 @@
 slug: /
 ---
 
-# Getting Started
+# ZGSLD
 
-ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greeters, handling PAM authentication through IPC, and launching a session.
+ZGSLD (Zig Greeter and Session Launcher Daemon) provides a daemon for launching greeters and user sessions, alongside a Zig library.
 
-Greeters are made by using the provided Zig module, which supports embedding ZGSLD functionality, so greeters do not have to depend on the `zgsld` executable. If you would like to find out more about developing a greeter with ZGSLD, refer to the [Greeter Development](greeter-development/setup.md) section.
+The library includes modules for building greeters and custom daemons. Greeters can use an external daemon or embed the ZGSLD daemon in the same executable. Custom IPC codecs support integration with greeters and daemons that were not built for ZGSLD.
 
 ## Features
 
-ZGSLD officially supports Linux and FreeBSD.
+- Greeters with an optional embedded ZGSLD daemon.
+- Custom IPC codecs for compatibility with other greeters and daemons.
+- Greeter previews with mock authentication.
+- Autologin with an optional interruptible delay.
+- X11 session support.
 
-- Supports standalone greeter builds without requiring the `zgsld` executable to be installed.
-- Autologin support with an optional interruptible delay that falls back to the greeter.
-- Supports X11 sessions by default; disable with `-Dx11=false`.
+## Running the daemon
 
-## Usage
+- [Installation](daemon/installation.md)
+- [Greeters](ecosystem.md#greeters)
+- [Configuration](daemon/configuration.md)
 
-First, choose a greeter you want to use.
+## Using the library
 
-Greeters can provide a standalone build with ZGSLD functionality built-in. 
-If you would rather have a single executable rather than requiring to run it with `zgsld`, 
-refer to the greeter's documentation to see if the greeter supports this use-case.
+- [Building a greeter](library/greeter.md)
+- [Building a daemon](library/daemon.md)
+- [Custom IPC codecs](library/ipc.md)
+- [Previews](library/previews.md)
+- [API reference](pathname:///zgsld/zig/)
 
-Otherwise, continue reading through this guide.
+## IPC protocol
 
-## Installation
+See [IPC protocol](ipc-protocol.md) for details of ZGSLD's IPC protocol.
 
-### Nix Flake
+## Ecosystem
 
-Add `zgsld` as a flake input:
-
-```nix
-{
-  inputs.zgsld.url = "github:ashametrine/zgsld";
-}
-```
-
-For NixOS, import the module and enable the service:
-
-```nix
-{
-  outputs = { nixpkgs, zgsld, ... }: {
-    nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        zgsld.nixosModules.default
-        {
-          services.zgsld = {
-            enable = true;
-            vt = 1;
-            greeter = {
-              command = "/path/to/your-greeter";
-              sessionType = "command"; # or "x11"
-            };
-          };
-        }
-      ];
-    };
-  };
-}
-```
-
-### Build From Source
-
-#### Dependencies
-
-- [Zig 0.17.0](https://ziglang.org/)
-- libc
-- libpam
-
-#### Building
-
-Build and install the `zgsld` executable:
-
-```sh
-zig build -Doptimize=ReleaseSafe
-
-sudo cp zig-out/bin/zgsld /usr/local/bin/zgsld
-```
-
-#### Create The Greeter User
-
-- **Linux:** `sudo useradd -M greeter`
-- **FreeBSD:** `sudo pw useradd greeter -d /nonexistent -s /usr/sbin/nologin`
-
-#### Install Example Configuration And PAM Files
-
-The repository ships example configuration, PAM, and service files in `res/`.
-
-```sh
-sudo mkdir /etc/zgsld
-
-sudo cp res/zgsld.ini /etc/zgsld/zgsld.ini
-sudo cp res/pam.d/zgsld /etc/pam.d/zgsld
-```
-
-#### Install Service File
-
-Some service files are provided in the repository at `res/services`.
-
-If none of them are applicable to your system, feel free to open an issue or a pull request.
+See [Ecosystem](ecosystem.md) for greeters, daemons, and libraries built with ZGSLD.

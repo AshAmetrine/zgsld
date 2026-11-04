@@ -25,12 +25,13 @@ const GreeterConfig = struct {
     /// Session backend used to run the greeter process.
     session_type: ipc.SessionType = .command,
 
-    /// Greeter command for zgsld to run (acts as a wrapper in standalone greeter mode).
+    /// Command used to launch the greeter.
+    /// When using the embedded daemon, the greeter's executable path and arguments are appended.
     command: ?[]const u8 = null,
 };
 
 const SessionConfig = struct {
-    /// PAM service used for user authentication.
+    /// PAM service used for user authentication and session management.
     service_name: []const u8 = build_options.service_name,
 };
 
@@ -44,7 +45,7 @@ const AutologinConfig = struct {
     /// Session command with optional args.
     command: ?[]const u8 = null,
 
-    /// Delay before launching autologin. 0 for immediate start.
+    /// Delay before autologin. 0 for immediate start.
     timeout_seconds: u64 = 0,
 };
 

@@ -1,0 +1,7 @@
+# Example PAM service for ZGSLD greeter sessions.
+#
+# Install as /etc/pam.d/zgsld-greeter and set:
+#   [greeter]
+#   service_name = zgsld-greeter
+
+session  include  login

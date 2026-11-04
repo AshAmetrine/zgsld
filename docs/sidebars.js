@@ -1,23 +1,32 @@
 module.exports = {
   guide: [
+    {type: 'doc', id: 'index', label: 'Overview'},
     {
       type: 'category',
-      label: 'Getting Started',
+      label: 'Running the daemon',
       collapsed: false,
       items: [
-        {type: 'doc', id: 'index', label: 'Installation'},
-        'greeters',
-        'configuration',
+        'daemon/installation',
+        'daemon/configuration',
       ],
     },
     {
       type: 'category',
-      label: 'Greeter Development',
+      label: 'Using the library',
       collapsed: false,
       items: [
-        'greeter-development/setup',
-        'greeter-development/api',
+        'library/greeter',
+        'library/daemon',
+        'library/previews',
+        'library/ipc',
       ],
+    },
+    'ipc-protocol',
+    'ecosystem',
+    {
+      type: 'link',
+      label: 'API reference',
+      href: 'pathname:///zgsld/zig/',
     },
   ],
 };

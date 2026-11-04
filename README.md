@@ -1,22 +1,29 @@
 # ZGSLD
 
-ZGSLD (Zig Greeter and Session Launcher Daemon), is a daemon for launching greeters, handling PAM authentication through IPC, and launching a session.
+ZGSLD (Zig Greeter and Session Launcher Daemon) provides a daemon for launching greeters and user sessions, alongside a Zig library.
+
+The library includes modules for building greeters and custom daemons. Greeters can use an external daemon or embed the ZGSLD daemon in the same executable. Custom IPC codecs support integration with greeters and daemons that were not built for ZGSLD.
 
 ## Features
 
-- Supports standalone greeter builds without requiring the `zgsld` executable to be installed.
-- Autologin support with an optional interruptible delay that falls back to the greeter.
-- Supports X11 sessions by default; disable with `-Dx11=false`.
+- Greeters with an optional embedded ZGSLD daemon.
+- Custom IPC codecs for compatibility with other greeters and daemons.
+- Greeter previews with mock authentication.
+- Autologin with an optional interruptible delay.
+- X11 session support.
 
-## Dependencies
+## Running the daemon
 
-- Zig 0.17.0
+Choose a [greeter](docs/content/ecosystem.md#greeters) to run with ZGSLD.
+
+### Dependencies
+
 - libc
 - pam
 
-## Installation
+### Installation
 
-### Nix Flake
+#### Nix Flake
 
 Add `zgsld` as a flake input:
 
@@ -51,7 +58,9 @@ For NixOS, import the module and enable the service:
 }
 ```
 
-### From Source
+#### From Source
+
+Building from source requires Zig 0.17.0.
 
 **Build and install the `zgsld` executable:**
 
@@ -79,27 +88,21 @@ sudo pw useradd greeter -d /nonexistent -s /usr/sbin/nologin
 sudo mkdir -p /etc/zgsld /etc/pam.d
 sudo cp res/zgsld.ini /etc/zgsld/zgsld.ini
 sudo cp res/pam.d/zgsld /etc/pam.d/zgsld
+sudo cp res/pam.d/zgsld-greeter /etc/pam.d/zgsld-greeter
 ```
 
 Then **install the appropriate service file for your init system** from `res/services/`.
 
-## Usage
-
-First, choose a greeter you want to use.
-
-Some greeters may provide a standalone build with `zgsld` functionality built in. In that case, refer to the greeter's documentation.
-
-Otherwise, `zgsld` runs the greeter configured in `/etc/zgsld/zgsld.ini`.
-
-## Configuration
+### Configuration
 
 The default config file path is `/etc/zgsld/zgsld.ini`.
+Set `command` in the `[greeter]` section to your greeter executable.
 
-See `res/zgsld.ini` for the documented example configuration file. The inline comments describe the available sections and settings.
+See [`res/zgsld.ini`](res/zgsld.ini) for the available sections and settings.
 
-## Greeter Development
+## Using the library
 
-A greeter can be built either as a separate executable or bundled with zgsld to produce a single executable which will call itself to launch the greeter.
+### Adding the dependency
 
 Add the dependency with `zig fetch`:
 
@@ -107,24 +110,50 @@ Add the dependency with `zig fetch`:
 zig fetch --save git+https://github.com/ashametrine/zgsld
 ```
 
+Configure the dependency in `build.zig`:
+
 ```zig
 const zgsld = b.dependency("zgsld", .{
     .target = target,
     .optimize = optimize,
-    .standalone = standalone,
-
-    // extra opts for standalone builds
-    .x11 = x11_support,
 });
-
-exe.root_module.addImport("zgsld", zgsld.module("zgsld"));
 ```
 
-### API Documentation
+### Modules
 
-Generate and serve the API documentation for local browsing:
+Choose the module for your project.
 
-```sh
-zig build docs
-python3 -m http.server --bind 127.0.0.1 -d zig-out/docs
+#### Greeter
+
+For building greeter applications.
+
+```zig
+exe.root_module.addImport("zgsld", zgsld.module("greeter"));
 ```
+
+#### Daemon
+
+For building custom daemons.
+
+```zig
+exe.root_module.addImport("zgsld", zgsld.module("daemon"));
+```
+
+#### IPC
+
+For implementing custom codecs.
+
+```zig
+exe.root_module.addImport("zgsld", zgsld.module("ipc"));
+```
+
+### Build options
+
+| Option         | Default | Modules         | Description                                       |
+|----------------|---------|-----------------|---------------------------------------------------|
+| `embed_daemon` | `true`  | Greeter         | Embed the ZGSLD daemon in the greeter executable. |
+| `x11`          | `true`  | Daemon, Greeter | Enable X11 session support.                       |
+
+For greeters, `x11` only applies when `embed_daemon = true`.
+
+Set `embed_daemon = false` to build a greeter launched by an external daemon.

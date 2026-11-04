@@ -1,6 +1,13 @@
+---
+slug: /configuration
+---
+
 # Configuration
 
 The default config file path is `/etc/zgsld/zgsld.ini`.
+Set `command` in the `[greeter]` section to your greeter executable.
+
+See [`res/zgsld.ini`](https://github.com/ashametrine/zgsld/blob/main/res/zgsld.ini) for the available sections and settings.
 
 ## Example
 
@@ -10,7 +17,7 @@ The default config file path is `/etc/zgsld/zgsld.ini`.
 vt = current
 
 [session]
-# PAM service name for starting a user session
+# PAM service used for user authentication and session management
 service_name = zgsld
 
 [autologin]
@@ -77,7 +84,7 @@ vt = current
 ### `[session]`
 #### `service_name`
 
-Controls which PAM service is used when starting a user session after authentication.
+Controls which PAM service is used for user authentication and session management.
 
 - Default: `login`
 - Valid values: PAM service name

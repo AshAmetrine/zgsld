@@ -34,7 +34,7 @@ ipc_codec: *ipc.Codec = ipc.Codec.binary,
 
 /// Context passed to `VTable.run`.
 pub const GreeterContext = struct {
-    /// IPC channel to zgsld for IPC communication.
+    /// IPC connection to the daemon.
     ipc: *IpcConnection,
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -42,7 +42,7 @@ pub const GreeterContext = struct {
     environ_map: *const std.process.Environ.Map,
 };
 
-/// Context passed to `VTable.configure` in standalone mode.
+/// Context passed to `VTable.configure` when starting the embedded daemon.
 pub const ConfigureContext = struct {
     /// zgsld-managed arena for values assigned into `config`.
     arena_allocator: std.mem.Allocator,
@@ -58,7 +58,7 @@ pub const ConfigureContext = struct {
 pub const VTable = struct {
     /// Runs the greeter
     run: *const fn (ctx: GreeterContext) anyerror!void,
-    /// Optional standalone hook to override `Config`.
+    /// Optional hook to override the embedded daemon's configuration.
     configure: ?*const fn (ctx: ConfigureContext) anyerror!void = null,
 };
 
