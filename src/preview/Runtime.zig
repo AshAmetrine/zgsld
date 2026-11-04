@@ -1,7 +1,7 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const SocketPair = @import("../SocketPair.zig");
-const preview = @import("../preview.zig");
+const SocketPair = @import("common").SocketPair;
+const preview = @import("preview");
 const Self = @This();
 
 ipc_conn: ipc.Connection,

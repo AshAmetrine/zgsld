@@ -1,7 +1,7 @@
 const std = @import("std");
 pub const Connection = @import("Shutdown/Connection.zig");
 const Shutdown = @This();
-const fd_utils = @import("../fd.zig");
+const fd_utils = @import("common").fd;
 const log = std.log.scoped(.zgsld);
 const handled_signals = [_]std.posix.SIG{ .TERM, .INT, .HUP, .QUIT, .ALRM };
 const term_seconds: c_uint = 5;

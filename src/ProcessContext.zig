@@ -5,7 +5,7 @@ io: std.Io,
 args: std.process.Args,
 environ_map: *const std.process.Environ.Map,
 
-pub fn fromInit(process_init: std.process.Init) @This() {
+pub fn fromInit(process_init: *const std.process.Init) @This() {
     return .{
         .gpa = process_init.gpa,
         .io = process_init.io,

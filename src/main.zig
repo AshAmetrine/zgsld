@@ -1,9 +1,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const zgsld = @import("zgsld");
-const Config = zgsld.Config;
-const daemon = zgsld.daemon;
-const worker_runtime = daemon.worker.runtime;
+const daemon = @import("daemon");
+const Config = daemon.Config;
 
 const clap = @import("clap");
 const zigini = @import("zigini");
@@ -18,14 +16,9 @@ const clap_param_str =
 ;
 
 pub fn main(init: std.process.Init) !void {
+    if (try daemon.runWorkerIfRequested(.fromInit(&init))) return;
+
     const allocator = init.gpa;
-    const process = zgsld.ProcessContext.fromInit(init);
-
-    if (try worker_runtime.parseArgs(init.minimal.args)) |opts| {
-        try worker_runtime.run(process, opts);
-        return;
-    }
-
     const params = comptime clap.parseParamsComptime(clap_param_str);
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, init.minimal.args, .{
@@ -70,10 +63,7 @@ pub fn main(init: std.process.Init) !void {
     const self_exe_path_len = try std.process.executablePath(init.io, &self_exe_path_buf);
     const self_exe_path = self_exe_path_buf[0..self_exe_path_len];
 
-    try daemon.session_manager.run(.{
-        .allocator = allocator,
-        .io = init.io,
-        .env_map = init.environ_map,
+    try daemon.run(.fromInit(&init), .{
         .self_exe_path = self_exe_path,
         .config = config,
     });

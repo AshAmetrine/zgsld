@@ -1,16 +1,15 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const fd_utils = @import("fd.zig");
-const Config = @import("Config.zig");
-const daemon = @import("daemon.zig");
+const fd_utils = @import("common").fd;
+const Config = @import("common").Config;
+const ProcessContext = @import("common").ProcessContext;
+const daemon = if (build_options.standalone) @import("daemon") else void;
 const ipc = @import("ipc");
-const preview_mod = @import("preview.zig");
-const PreviewRuntime = @import("preview/Runtime.zig");
-const ProcessContext = @import("ProcessContext.zig");
+const preview = @import("preview");
+const PreviewRuntime = @import("../preview/Runtime.zig");
 
 const IpcConnection = ipc.Connection;
 const log = std.log.scoped(.zgsld);
-const worker_runtime = daemon.worker.runtime;
 const Self = @This();
 
 fn appendShellQuotedArg(
@@ -37,8 +36,10 @@ ipc_codec: *ipc.Codec = ipc.Codec.binary,
 pub const GreeterContext = struct {
     /// IPC channel to zgsld for IPC communication.
     ipc: *IpcConnection,
-    /// Process state supplied by the host entrypoint.
-    process: ProcessContext,
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    args: std.process.Args,
+    environ_map: *const std.process.Environ.Map,
 };
 
 /// Context passed to `VTable.configure` in standalone mode.
@@ -47,8 +48,10 @@ pub const ConfigureContext = struct {
     arena_allocator: std.mem.Allocator,
     /// Mutable config initialized from build defaults.
     config: *Config,
-    /// Process state supplied by the host entrypoint.
-    process: ProcessContext,
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    args: std.process.Args,
+    environ_map: *const std.process.Environ.Map,
 };
 
 /// Integration callbacks implemented by the greeter.
@@ -62,23 +65,19 @@ pub const VTable = struct {
 pub const Options = struct {
     ipc_codec: *ipc.Codec = ipc.Codec.binary,
     vtable: *const VTable,
-    process: ProcessContext,
 };
 
-pub fn init(opts: Options) Self {
+pub fn init(process: ProcessContext, opts: Options) Self {
     return .{
         .vtable = opts.vtable,
-        .process = opts.process,
+        .process = process,
         .ipc_codec = opts.ipc_codec,
     };
 }
 
 pub fn run(self: Self) !void {
     if (build_options.standalone) {
-        if (try worker_runtime.parseArgs(self.process.args)) |opts| {
-            try worker_runtime.run(self.process, opts);
-            return;
-        }
+        if (try daemon.runWorkerIfRequested(self.process)) return;
     }
 
     if (self.process.environ_map.get("ZGSLD_SOCK")) |sock| {
@@ -105,7 +104,7 @@ pub fn run(self: Self) !void {
 }
 
 /// Runs the greeter against a mock IPC daemon.
-pub fn runPreview(self: Self, opts: preview_mod.Options) !void {
+pub fn runPreview(self: Self, opts: preview.Options) !void {
     var ctx: PreviewRuntime.ServerCtx = undefined;
     var runtime = try PreviewRuntime.init(self.process.io, &ctx, .{
         .codec = self.ipc_codec,
@@ -129,7 +128,10 @@ fn runStandalone(self: Self) !void {
         try configure(.{
             .arena_allocator = configure_arena.allocator(),
             .config = &zgsld_config,
-            .process = self.process,
+            .gpa = self.process.gpa,
+            .io = self.process.io,
+            .args = self.process.args,
+            .environ_map = self.process.environ_map,
         });
     }
 
@@ -164,19 +166,19 @@ fn runStandalone(self: Self) !void {
     log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
     log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
 
-    try daemon.session_manager.run(.{
-        .allocator = self.process.gpa,
+    try daemon.run(self.process, .{
         .ipc_codec = self.ipc_codec,
         .self_exe_path = self_exe_path,
         .config = zgsld_config,
-        .io = self.process.io,
-        .env_map = self.process.environ_map,
     });
 }
 
 fn greeterContext(self: Self, ipc_conn: *IpcConnection) GreeterContext {
     return .{
         .ipc = ipc_conn,
-        .process = self.process,
+        .gpa = self.process.gpa,
+        .io = self.process.io,
+        .args = self.process.args,
+        .environ_map = self.process.environ_map,
     };
 }

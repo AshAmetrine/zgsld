@@ -1,6 +1,6 @@
 const std = @import("std");
-const SocketPair = @import("../../SocketPair.zig");
-const fd_utils = @import("../../fd.zig");
+const SocketPair = @import("common").SocketPair;
+const fd_utils = @import("common").fd;
 const Connection = @This();
 
 io: std.Io,

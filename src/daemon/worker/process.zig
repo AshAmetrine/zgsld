@@ -1,6 +1,6 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const Config = @import("../../Config.zig");
+const Config = @import("common").Config;
 
 pub const SessionClass = enum {
     user,

@@ -46,45 +46,86 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    const ipc_mod = b.createModule(.{
+    const ipc_mod = b.addModule("ipc", .{
         .root_source_file = b.path("src/ipc.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    const zgsld_mod = b.addModule("zgsld", .{
-        .root_source_file = b.path("src/root.zig"),
+    const common = b.createModule(.{
+        .root_source_file = b.path("src/common.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
         .imports = &.{
             .{ .name = "build_options", .module = build_options_mod },
             .{ .name = "ipc", .module = ipc_mod },
             .{ .name = "vt", .module = vt_mod },
         },
     });
-
-    if (is_top_level or standalone) {
-        const pam = b.lazyDependency("zig_pam", .{ .target = target, .optimize = optimize }) orelse return;
-        zgsld_mod.addImport("pam", pam.module("pam"));
+    const preview = b.createModule(.{
+        .root_source_file = b.path("src/preview.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options_mod },
+            .{ .name = "ipc", .module = ipc_mod },
+        },
+    });
+    const daemon = b.addModule("daemon", .{
+        .root_source_file = b.path("src/daemon.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options_mod },
+            .{ .name = "ipc", .module = ipc_mod },
+            .{ .name = "vt", .module = vt_mod },
+            .{ .name = "common", .module = common },
+            .{ .name = "preview", .module = preview },
+        },
+    });
+    const greeter = b.addModule("greeter", .{
+        .root_source_file = b.path("src/greeter.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options_mod },
+            .{ .name = "ipc", .module = ipc_mod },
+            .{ .name = "common", .module = common },
+            .{ .name = "preview", .module = preview },
+        },
+    });
+    if (standalone) {
+        greeter.addImport("daemon", daemon);
     }
 
+    const docs_mod = b.createModule(.{
+        .root_source_file = b.path("src/zgsld.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "greeter", .module = greeter },
+            .{ .name = "daemon", .module = daemon },
+            .{ .name = "ipc", .module = ipc_mod },
+        },
+    });
+
+    const pam = b.lazyDependency("zig_pam", .{
+        .target = target,
+        .optimize = optimize,
+    }) orelse return;
+    daemon.addImport("pam", pam.module("pam"));
+
     const test_step = b.step("test", "Run all tests.");
-    const tests = b.addTest(.{ .root_module = zgsld_mod });
-    const run_tests = b.addRunArtifact(tests);
-    test_step.dependOn(&run_tests.step);
+    const greeter_tests = b.addTest(.{ .name = "greeter", .root_module = greeter });
+    const daemon_tests = b.addTest(.{ .name = "daemon", .root_module = daemon });
+    const ipc_tests = b.addTest(.{ .name = "ipc", .root_module = ipc_mod });
+    test_step.dependOn(&b.addRunArtifact(greeter_tests).step);
+    test_step.dependOn(&b.addRunArtifact(daemon_tests).step);
+    test_step.dependOn(&b.addRunArtifact(ipc_tests).step);
 
     const docs_obj = b.addObject(.{
-        .name = "root",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "build_options", .module = build_options_mod },
-                .{ .name = "ipc", .module = ipc_mod },
-                .{ .name = "vt", .module = vt_mod },
-            },
-        }),
+        .name = "zgsld",
+        .root_module = docs_mod,
     });
     const docs_install = b.addInstallDirectory(.{
         .source_dir = docs_obj.getEmittedDocs(),
@@ -113,7 +154,7 @@ pub fn build(b: *std.Build) !void {
                 .{ .name = "build_options", .module = build_options_mod },
                 .{ .name = "clap", .module = clap.module("clap") },
                 .{ .name = "zigini", .module = zigini.module("zigini") },
-                .{ .name = "zgsld", .module = zgsld_mod },
+                .{ .name = "daemon", .module = daemon },
             },
             .link_libc = true,
         }),

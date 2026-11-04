@@ -1,12 +1,11 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const fd_utils = @import("../../fd.zig");
+const fd_utils = @import("common").fd;
 const autologin = @import("runtime/autologin.zig");
 const greeter = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
 const Connection = @import("../Shutdown/Connection.zig");
-const ProcessContext = @import("../../ProcessContext.zig");
 const Vt = @import("vt").Vt;
 const SessionClass = @import("process.zig").SessionClass;
 
@@ -38,31 +37,41 @@ pub fn parseArgs(args: std.process.Args) !?Options {
     };
 }
 
-pub fn run(process: ProcessContext, opts: Options) !void {
+pub fn run(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    opts: Options,
+) !void {
     signals.installHandlers();
-    const control_raw = process.environ_map.get("ZGSLD_CONTROL") orelse
+    const control_raw = environ_map.get("ZGSLD_CONTROL") orelse
         return error.MissingControlFd;
     const control_fd = try std.fmt.parseInt(std.posix.fd_t, control_raw, 10);
-    var control = try Connection.init(process.io, .{
+    var control = try Connection.init(io, .{
         .handle = control_fd,
         .flags = .{ .nonblocking = false },
     });
     defer control.deinit();
 
-    const vt = try Vt.parse(process.environ_map.get("ZGSLD_VT"));
+    const vt = try Vt.parse(environ_map.get("ZGSLD_VT"));
 
     switch (opts.session_class) {
         .greeter => {
-            const sock_fd = try parseZgsldSock(process.environ_map);
-            const greeter_cmd = process.environ_map.get("ZGSLD_GREETER_CMD") orelse return error.MissingGreeterCmd;
-            const greeter_session_type_raw = process.environ_map.get("ZGSLD_GREETER_SESSION_TYPE") orelse return error.MissingGreeterSessionType;
-            const greeter_session_type = std.meta.stringToEnum(ipc.SessionType, greeter_session_type_raw) orelse return error.InvalidGreeterSessionType;
+            const sock_fd = try parseZgsldSock(environ_map);
+            const greeter_cmd = environ_map.get("ZGSLD_GREETER_CMD") orelse
+                return error.MissingGreeterCmd;
+            const greeter_session_type_raw = environ_map.get("ZGSLD_GREETER_SESSION_TYPE") orelse
+                return error.MissingGreeterSessionType;
+            const greeter_session_type = std.meta.stringToEnum(
+                ipc.SessionType,
+                greeter_session_type_raw,
+            ) orelse return error.InvalidGreeterSessionType;
 
             try greeter.run(.{
-                .allocator = process.gpa,
-                .io = process.io,
+                .allocator = gpa,
+                .io = io,
                 .control = &control,
-                .env_map = process.environ_map,
+                .env_map = environ_map,
                 .service_name = opts.service_name,
                 .username = opts.greeter_username.?,
                 .ipc_fd = sock_fd,
@@ -72,7 +81,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
             });
         },
         .user => {
-            const sock_fd = try parseZgsldSock(process.environ_map);
+            const sock_fd = try parseZgsldSock(environ_map);
             try fd_utils.setCloseOnExec(sock_fd);
 
             var ipc_conn = ipc.Connection.init(.{
@@ -80,28 +89,35 @@ pub fn run(process: ProcessContext, opts: Options) !void {
                 .flags = .{ .nonblocking = false },
             }, .{});
             try login.run(.{
-                .allocator = process.gpa,
-                .io = process.io,
+                .allocator = gpa,
+                .io = io,
                 .control = &control,
-                .env_map = process.environ_map,
+                .env_map = environ_map,
                 .service_name = opts.service_name,
                 .ipc_conn = &ipc_conn,
                 .vt = vt,
             });
         },
         .autologin => {
-            const autologin_user = process.environ_map.get("ZGSLD_AUTOLOGIN_USER") orelse return error.MissingAutologinUser;
-            const autologin_session_type_raw = process.environ_map.get("ZGSLD_AUTOLOGIN_SESSION_TYPE") orelse return error.MissingAutologinSessionType;
-            const autologin_session_type = std.meta.stringToEnum(ipc.SessionType, autologin_session_type_raw) orelse return error.InvalidAutologinSessionType;
-            const autologin_cmd = process.environ_map.get("ZGSLD_AUTOLOGIN_CMD") orelse return error.MissingAutologinCmd;
-            const autologin_user_z = try process.gpa.dupeSentinel(u8, autologin_user, 0);
-            defer process.gpa.free(autologin_user_z);
+            const autologin_user = environ_map.get("ZGSLD_AUTOLOGIN_USER") orelse
+                return error.MissingAutologinUser;
+            const autologin_session_type_raw = environ_map.get(
+                "ZGSLD_AUTOLOGIN_SESSION_TYPE",
+            ) orelse return error.MissingAutologinSessionType;
+            const autologin_session_type = std.meta.stringToEnum(
+                ipc.SessionType,
+                autologin_session_type_raw,
+            ) orelse return error.InvalidAutologinSessionType;
+            const autologin_cmd = environ_map.get("ZGSLD_AUTOLOGIN_CMD") orelse
+                return error.MissingAutologinCmd;
+            const autologin_user_z = try gpa.dupeSentinel(u8, autologin_user, 0);
+            defer gpa.free(autologin_user_z);
 
             try autologin.run(.{
-                .allocator = process.gpa,
-                .io = process.io,
+                .allocator = gpa,
+                .io = io,
                 .control = &control,
-                .env_map = process.environ_map,
+                .env_map = environ_map,
                 .service_name = opts.service_name,
                 .user = autologin_user_z,
                 .info = .{
