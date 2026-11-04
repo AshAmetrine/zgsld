@@ -5,6 +5,7 @@ const Config = @import("Config.zig");
 const daemon = @import("daemon.zig");
 const ipc = @import("ipc");
 const preview_mod = @import("preview.zig");
+const PreviewRuntime = @import("preview/Runtime.zig");
 const ProcessContext = @import("ProcessContext.zig");
 
 const IpcConnection = ipc.Connection;
@@ -104,9 +105,9 @@ pub fn run(self: Self) !void {
 }
 
 /// Runs the greeter against a mock IPC daemon.
-pub fn runPreview(self: Self, opts: preview_mod.api.Options) !void {
-    var ctx: preview_mod.Runtime.ServerCtx = undefined;
-    var runtime = try preview_mod.Runtime.init(self.process.io, &ctx, .{
+pub fn runPreview(self: Self, opts: preview_mod.Options) !void {
+    var ctx: PreviewRuntime.ServerCtx = undefined;
+    var runtime = try PreviewRuntime.init(self.process.io, &ctx, .{
         .codec = self.ipc_codec,
         .preview = opts,
     });

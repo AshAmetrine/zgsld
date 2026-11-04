@@ -1,68 +1,100 @@
 const std = @import("std");
 const ipc = @import("ipc");
-const SocketPair = @import("SocketPair.zig");
 const build_options = @import("build_options");
-pub const api = @import("preview/api.zig");
 
-pub const Runtime = struct {
-    ipc_conn: ipc.Connection,
-    thread: ?std.Thread,
-    ctx: *Runtime.ServerCtx,
-
-    pub const Options = struct {
-        codec: *ipc.Codec = ipc.Codec.binary,
-        preview: api.Options = .{},
-    };
-
-    pub const ServerCtx = struct {
-        io: std.Io,
-        conn: ipc.Connection,
-        opts: api.Options,
-        result: anyerror!void,
-    };
-
-    pub fn init(io: std.Io, ctx: *Runtime.ServerCtx, opts: Options) !Runtime {
-        const fds = try SocketPair.init();
-
-        ctx.* = .{
-            .io = io,
-            .conn = ipc.Connection.init(fds.parent, .{ .codec = opts.codec }),
-            .opts = opts.preview,
-            .result = {},
-        };
-        errdefer ctx.conn.deinit(io);
-
-        var ipc_conn = ipc.Connection.init(fds.child, .{ .codec = opts.codec });
-        errdefer ipc_conn.deinit(io);
-
-        const thread = try std.Thread.spawn(.{}, ipcThreadMain, .{ctx});
-
-        return .{
-            .ipc_conn = ipc_conn,
-            .thread = thread,
-            .ctx = ctx,
-        };
-    }
-
-    pub fn closeAndJoin(self: *Runtime) !void {
-        const thread = self.thread orelse return;
-        self.thread = null;
-
-        self.ipc_conn.deinit(self.ctx.io);
-        thread.join();
-
-        return self.ctx.result;
-    }
-
-    pub fn deinit(self: *Runtime) void {
-        self.closeAndJoin() catch {};
-    }
+pub const password_auth_steps = [_]Step{
+    .challenge("Password: ", .any, .{}),
 };
 
-fn ipcThreadMain(ctx: *Runtime.ServerCtx) void {
-    defer ctx.conn.deinit(ctx.io);
-    ctx.result = run(ctx.io, &ctx.conn, ctx.opts);
-}
+pub const change_auth_token_steps = [_]Step{
+    .info("Authentication token update required."),
+    .challenge("Current password: ", .expect_previous, .{
+        .on_failure = &.{
+            .err("Current password is incorrect."),
+        },
+    }),
+    .retry(3, &.{
+        .challenge("New password: ", .any, .{}),
+        .challenge("Retype new password: ", .expect_previous, .{
+            .on_failure = &.{
+                .err("Passwords do not match."),
+            },
+        }),
+    }),
+};
+
+pub const Options = struct {
+    authenticate_steps: []const Step = &password_auth_steps,
+    post_auth_steps: []const Step = &.{},
+    expected_user: ?[]const u8 = null,
+};
+
+pub const ExpectedResponse = union(enum) {
+    pub fn expect(value: []const u8) ExpectedResponse {
+        return .{ .value = value };
+    }
+
+    value: []const u8,
+    any: void,
+    expect_previous: void,
+};
+
+pub const ChallengeOptions = struct {
+    echo: bool = false,
+    on_failure: []const ipc.PamMessage = &.{},
+};
+
+pub const Step = union(enum) {
+    internal_error: void,
+    pam_message: ipc.PamMessage,
+    pam_challenge: struct {
+        request: ipc.PamConvRequest,
+        expected_response: ExpectedResponse,
+        on_failure: []const ipc.PamMessage = &.{},
+    },
+    retry_block: struct {
+        attempts: usize,
+        steps: []const Step,
+    },
+
+    pub fn challenge(
+        msg: []const u8,
+        expected_response: ExpectedResponse,
+        opts: ChallengeOptions,
+    ) Step {
+        return .{
+            .pam_challenge = .{
+                .request = .{
+                    .echo = opts.echo,
+                    .message = msg,
+                },
+                .expected_response = expected_response,
+                .on_failure = opts.on_failure,
+            },
+        };
+    }
+
+    pub fn retry(attempts: usize, steps: []const Step) Step {
+        return .{
+            .retry_block = .{
+                .attempts = attempts,
+                .steps = steps,
+            },
+        };
+    }
+
+    pub fn info(msg: []const u8) Step {
+        return .{
+            .pam_message = .info(msg),
+        };
+    }
+
+    pub fn err(msg: []const u8) Step {
+        return .{
+            .pam_message = .err(msg),
+        };
+    }
+};
 
 const AuthState = enum {
     cancelled,
@@ -88,10 +120,10 @@ const StepState = struct {
 
 const Conversation = struct {
     conn: *ipc.Connection,
-    opts: api.Options,
+    opts: Options,
 };
 
-pub fn run(io: std.Io, connection: *ipc.Connection, options: api.Options) !void {
+pub fn run(io: std.Io, connection: *ipc.Connection, options: Options) !void {
     var conversation: Conversation = .{ .conn = connection, .opts = options };
     const ctx = &conversation;
     var event_buf: [ipc.event_buf_size]u8 = undefined;
@@ -186,7 +218,7 @@ fn runAuthSequence(
 
 fn runSteps(
     ctx: *Conversation,
-    steps: []const api.Step,
+    steps: []const Step,
     io_reader: *std.Io.Reader,
     io_writer: *std.Io.Writer,
     event_buf: []u8,
