@@ -75,7 +75,7 @@ const SpawnedWorkers = struct {
 };
 
 pub const SessionManagerRunOpts = struct {
-    ipc_codec: ipc.Codec = .binary,
+    ipc_codec: *ipc.Codec = ipc.Codec.binary,
     allocator: std.mem.Allocator,
     io: std.Io,
     env_map: *const std.process.Environ.Map,
@@ -250,7 +250,7 @@ fn forwardIpc(
     shutdown: *Shutdown,
     greeter_worker_proc: *Shutdown.Worker,
     session_worker_proc: *Shutdown.Worker,
-    ipc_codec: ipc.Codec,
+    ipc_codec: *ipc.Codec,
 ) !void {
     // A completed handoff has already reaped the greeter. Otherwise both
     // workers belong to the aborted login attempt.

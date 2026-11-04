@@ -1,7 +1,7 @@
 //! IPC events, connections and pluggable codecs for greeters and zgsld.
 
 const std = @import("std");
-const Binary = @import("ipc/binary.zig");
+const binary_codec = @import("ipc/binary.zig");
 
 /// Recommended buffer size for event payloads and socket IO.
 pub const event_buf_size = 4096;
@@ -103,32 +103,28 @@ pub const Event = union(enum) {
 };
 
 pub const Codec = struct {
-    context: ?*anyopaque = null,
     vtable: *const VTable,
 
     pub const VTable = struct {
-        readEvent: *const fn (?*anyopaque, *std.Io.Reader, *std.Io.Writer, []u8) anyerror!Event,
-        writeEvent: *const fn (?*anyopaque, *std.Io.Writer, *const Event) anyerror!void,
+        readEvent: *const fn (*Codec, *std.Io.Reader, *std.Io.Writer, []u8) anyerror!Event,
+        writeEvent: *const fn (*Codec, *std.Io.Writer, *const Event) anyerror!void,
     };
 
-    pub const binary: Codec = .{ .vtable = &.{
-        .readEvent = Binary.readEvent,
-        .writeEvent = Binary.writeEvent,
-    } };
+    pub const binary: *Codec = &binary_codec.interface;
 
     /// Reads an event. The codec can use the writer to send protocol replies.
     /// Any replies must be flushed before reading more data or returning an event.
     pub fn readEvent(
-        self: Codec,
+        self: *Codec,
         reader: *std.Io.Reader,
         writer: *std.Io.Writer,
         event_buf: []u8,
     ) !Event {
-        return self.vtable.readEvent(self.context, reader, writer, event_buf);
+        return self.vtable.readEvent(self, reader, writer, event_buf);
     }
 
-    pub fn writeEvent(self: Codec, writer: *std.Io.Writer, event: *const Event) !void {
-        return self.vtable.writeEvent(self.context, writer, event);
+    pub fn writeEvent(self: *Codec, writer: *std.Io.Writer, event: *const Event) !void {
+        return self.vtable.writeEvent(self, writer, event);
     }
 };
 
@@ -137,13 +133,13 @@ pub const Connection = struct {
     const Self = @This();
 
     file: std.Io.File,
-    codec: Codec = .binary,
+    codec: *Codec = Codec.binary,
 
     pub const Options = struct {
-        codec: Codec = .binary,
+        codec: *Codec = Codec.binary,
     };
 
-    /// Takes ownership of `file` and copies the codec handle, borrowing its context.
+    /// `Connection.deinit` closes `file`. The codec must outlive the connection.
     pub fn init(file: std.Io.File, opts: Options) Self {
         return .{ .file = file, .codec = opts.codec };
     }

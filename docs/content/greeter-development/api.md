@@ -192,7 +192,7 @@ const std = @import("std");
 const zgsld = @import("zgsld");
 const ipc = zgsld.ipc;
 
-const my_codec: ipc.Codec = .{
+pub var interface: ipc.Codec = .{
     .vtable = &.{
         .readEvent = readEvent,
         .writeEvent = writeEvent,
@@ -200,7 +200,7 @@ const my_codec: ipc.Codec = .{
 };
 
 fn readEvent(
-    _: ?*anyopaque,
+    _: *ipc.Codec,
     reader: *std.Io.Reader,
     writer: *std.Io.Writer,
     event_buf: []u8,
@@ -209,7 +209,7 @@ fn readEvent(
 }
 
 fn writeEvent(
-    _: ?*anyopaque,
+    _: *ipc.Codec,
     writer: *std.Io.Writer,
     event: *const ipc.Event,
 ) !void {
@@ -222,7 +222,7 @@ You can pass your custom codec to `Zgsld.init`:
 ```zig
 const app = zgsld.Zgsld.init(.{
     .process = .fromInit(init),
-    .ipc_codec = my_codec,
+    .ipc_codec = &my_codec.interface,
     .vtable = &.{
         .run = run,
         .configure = configure,

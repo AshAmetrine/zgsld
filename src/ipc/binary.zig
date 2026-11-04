@@ -13,6 +13,13 @@ const EventType = std.meta.Tag(Event);
 const SessionType = ipc.SessionType;
 const native = builtin.target.cpu.arch.endian();
 
+pub var interface: ipc.Codec = .{
+    .vtable = &.{
+        .readEvent = readEvent,
+        .writeEvent = writeEvent,
+    },
+};
+
 fn readHeader(io_reader: *std.Io.Reader) !struct { tag: EventType, payload_len: usize } {
     const tag_num = try io_reader.takeByte();
     const payload_len_u32 = try io_reader.takeInt(u32, native);
@@ -33,7 +40,7 @@ fn writeHeader(io_writer: *std.Io.Writer, tag: EventType, payload_len: u32) !voi
 /// Returned string/slice fields borrow from `event_buf` and are valid only
 /// until the next `readEvent` call that reuses that buffer.
 pub fn readEvent(
-    _: ?*anyopaque,
+    _: *ipc.Codec,
     io_reader: *std.Io.Reader,
     _: *std.Io.Writer,
     event_buf: []u8,
@@ -126,7 +133,7 @@ pub fn readEvent(
 }
 
 /// Encodes and writes one event to the stream.
-pub fn writeEvent(_: ?*anyopaque, io_writer: *std.Io.Writer, event: *const Event) !void {
+pub fn writeEvent(_: *ipc.Codec, io_writer: *std.Io.Writer, event: *const Event) !void {
     switch (event.*) {
         .pam_start_auth => |ev| {
             const user_len: u32 = @intCast(ev.user.len);
