@@ -61,7 +61,7 @@ pub const Runtime = struct {
 
 fn ipcThreadMain(ctx: *Runtime.ServerCtx) void {
     defer ctx.conn.deinit(ctx.io);
-    ctx.result = runMockIpc(ctx);
+    ctx.result = run(ctx.io, &ctx.conn, ctx.opts);
 }
 
 const AuthState = enum {
@@ -86,14 +86,21 @@ const StepState = struct {
     }
 };
 
-fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
+const Conversation = struct {
+    conn: *ipc.Connection,
+    opts: api.Options,
+};
+
+pub fn run(io: std.Io, connection: *ipc.Connection, options: api.Options) !void {
+    var conversation: Conversation = .{ .conn = connection, .opts = options };
+    const ctx = &conversation;
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     var rbuf: [ipc.event_buf_size]u8 = undefined;
     var wbuf: [ipc.event_buf_size]u8 = undefined;
     var authenticated = false;
 
-    var reader = ctx.conn.reader(ctx.io, &rbuf);
-    var writer = ctx.conn.writer(ctx.io, &wbuf);
+    var reader = connection.reader(io, &rbuf);
+    var writer = connection.writer(io, &wbuf);
     const io_reader = &reader.interface;
     const io_writer = &writer.interface;
 
@@ -135,7 +142,7 @@ fn runMockIpc(ctx: *Runtime.ServerCtx) !void {
 }
 
 fn runAuthSequence(
-    ctx: *Runtime.ServerCtx,
+    ctx: *Conversation,
     user: []const u8,
     io_reader: *std.Io.Reader,
     io_writer: *std.Io.Writer,
@@ -178,7 +185,7 @@ fn runAuthSequence(
 }
 
 fn runSteps(
-    ctx: *Runtime.ServerCtx,
+    ctx: *Conversation,
     steps: []const api.Step,
     io_reader: *std.Io.Reader,
     io_writer: *std.Io.Writer,
@@ -259,7 +266,7 @@ fn runSteps(
 }
 
 fn emitFailureMessages(
-    ctx: *Runtime.ServerCtx,
+    ctx: *Conversation,
     io_writer: *std.Io.Writer,
     messages: []const ipc.PamMessage,
 ) !void {
@@ -269,7 +276,7 @@ fn emitFailureMessages(
 }
 
 fn sendEvent(
-    ctx: *Runtime.ServerCtx,
+    ctx: *Conversation,
     io_writer: *std.Io.Writer,
     event: *const ipc.Event,
 ) !void {

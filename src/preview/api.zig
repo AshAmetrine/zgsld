@@ -1,5 +1,7 @@
 const ipc = @import("ipc");
 
+pub const run = @import("../preview.zig").run;
+
 pub const password_auth_steps = [_]Step{
     .challenge("Password: ", .any, .{}),
 };
