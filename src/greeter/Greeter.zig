@@ -164,7 +164,9 @@ fn runDaemon(self: Self) !void {
     log.debug("Greeter Path: {s}", .{self_exe_path});
     log.debug("Greeter User: {s}", .{zgsld_config.greeter.user});
     log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
-    log.debug("Greeter PAM Service Name: {s}", .{zgsld_config.greeter.service_name});
+    log.debug("Greeter PAM Service Name: {s}", .{
+        zgsld_config.greeter.service_name orelse zgsld_config.session.service_name,
+    });
 
     try daemon.run(self.process, .{
         .ipc_codec = self.ipc_codec,

@@ -44,7 +44,7 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
     }
 
     const service_name = switch (opts.session_class) {
-        .greeter => opts.config.greeter.service_name,
+        .greeter => opts.config.greeter.service_name orelse opts.config.session.service_name,
         .user, .autologin => opts.config.session.service_name,
     };
 

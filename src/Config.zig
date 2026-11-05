@@ -20,7 +20,7 @@ const GreeterConfig = struct {
     user: []const u8 = build_options.greeter_user,
 
     /// PAM service used to start the greeter's session.
-    service_name: []const u8 = build_options.greeter_service_name,
+    service_name: ?[]const u8 = build_options.greeter_service_name,
 
     /// Session backend used to run the greeter process.
     session_type: ipc.SessionType = .command,
