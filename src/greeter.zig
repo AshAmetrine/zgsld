@@ -1,6 +1,8 @@
 //! Greeter application lifecycle, IPC interfaces and preview support.
 
-pub const ProcessContext = @import("common").ProcessContext;
+const common = @import("common");
+pub const ProcessContext = common.ProcessContext;
+pub const Config = common.Config;
 pub const Greeter = @import("greeter/Greeter.zig");
 pub const ipc = @import("ipc");
 pub const preview = @import("preview");
