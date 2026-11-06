@@ -67,11 +67,11 @@ The optional `configure` callback runs before the embedded ZGSLD daemon starts a
 
 ### External Daemon
 
-When the greeter is launched by `zgsld`, `app.run()` uses the IPC connection passed through by `zgsld` in the `ZGSLD_SOCK` environment variable and then calls your `.run` callback.
+When the greeter is launched by `zgsld`, `app.run(.{})` uses the IPC connection passed through by `zgsld` in the `ZGSLD_SOCK` environment variable and then calls your `.run` callback.
 
 ### Embedded Daemon
 
-When built with `embed_daemon = true` and launched directly, `app.run()` starts the embedded ZGSLD daemon.
+When built with `embed_daemon = true` and launched directly, `app.run(.{})` starts the embedded ZGSLD daemon.
 
 This launches the manager and the worker processes needed to:
 
@@ -81,32 +81,40 @@ This launches the manager and the worker processes needed to:
 
 The manager process forwards IPC events between the greeter and the session worker.
 
-## Custom IPC codecs
+## Custom IPC transports and codecs
 
-You can pass a custom codec to `Greeter.init`:
+To use a custom transport and codec, create an IPC connection and pass it to `Greeter.run` through `.ipc_conn`:
 
 ```zig
+var connection = zgsld.ipc.Connection.init(transport, .{
+    .codec = &codec.interface,
+});
+
 const app = zgsld.Greeter.init(.fromInit(&init), .{
-    .ipc_codec = &my_codec.interface,
     .vtable = &.{
         .run = run,
-        .configure = configure,
     },
 });
 
-try app.run();
+try app.run(.{ .ipc_conn = &connection });
 ```
 
 When your greeter runs under an external daemon, its codec must match the daemon's protocol. The standard `zgsld` executable uses the built-in binary codec.
 
 See [Custom IPC codecs](ipc.md) for details on making a custom codec.
 
-[Previews](previews.md) use the codec supplied to `Greeter.init`, so you can test a custom codec alongside your greeter by calling `app.runPreview()` instead of `app.run()`:
+[Previews](previews.md) use the codecs you pass to `app.runPreview`, allowing you to test a custom codec alongside your greeter:
 
 ```zig
 try app.runPreview(.{
-    .authenticate_steps = &zgsld.preview.password_auth_steps,
-    .post_auth_steps = &zgsld.preview.change_auth_token_steps,
+    .codecs = .{
+        .greeter = &client_codec.interface,
+        .daemon = &daemon_codec.interface,
+    },
+    .preview = .{
+        .authenticate_steps = &zgsld.preview.password_auth_steps,
+        .post_auth_steps = &zgsld.preview.change_auth_token_steps,
+    },
 });
 ```
 

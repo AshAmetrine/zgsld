@@ -9,7 +9,7 @@ Previews also support and can be useful for testing [custom IPC codecs](ipc.md).
 
 ## Example
 
-To run a preview, call `app.runPreview()` instead of `app.run()`.
+To run a preview, call `app.runPreview` instead of `app.run`.
 The following snippet is from a project which runs a preview based on build options:
 
 ```zig
@@ -23,11 +23,13 @@ pub fn main(init: std.process.Init) !void {
 
     if (build_options.preview) {
         try app.runPreview(.{
-            .authenticate_steps = &zgsld.preview.password_auth_steps,
-            .post_auth_steps = &zgsld.preview.change_auth_token_steps,
+            .preview = .{
+                .authenticate_steps = &zgsld.preview.password_auth_steps,
+                .post_auth_steps = &zgsld.preview.change_auth_token_steps,
+            },
         });
     } else {
-        try app.run();
+        try app.run(.{});
     }
 }
 ```
