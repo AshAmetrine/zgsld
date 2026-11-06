@@ -59,12 +59,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (res.args.vt) |vt| config.vt = try Config.Vt.parse(vt);
 
-    var self_exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const self_exe_path_len = try std.process.executablePath(init.io, &self_exe_path_buf);
-    const self_exe_path = self_exe_path_buf[0..self_exe_path_len];
-
     try daemon.run(.fromInit(&init), .{
-        .self_exe_path = self_exe_path,
         .config = config,
     });
 }

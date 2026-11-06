@@ -170,7 +170,6 @@ fn runDaemon(self: Self) !void {
 
     try daemon.run(self.process, .{
         .ipc_codec = self.ipc_codec,
-        .self_exe_path = self_exe_path,
         .config = zgsld_config,
     });
 }

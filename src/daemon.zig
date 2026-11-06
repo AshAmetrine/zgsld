@@ -76,14 +76,13 @@ const SpawnedWorkers = struct {
     greeter_file: std.Io.File,
 };
 
-pub const Options = struct {
+pub const RunOptions = struct {
     ipc_codec: *ipc.Codec = ipc.Codec.binary,
-    self_exe_path: []const u8,
     config: Config,
 };
 
 /// Handles child processes started by the daemon to run greeters and user sessions
-/// Call this before anything else in `main`. 
+/// Call this before anything else in `main`.
 /// Continue normal startup if it returns false. Otherwise, return from `main`.
 pub fn runWorkerIfRequested(process: ProcessContext) !bool {
     const opts = try worker.runtime.parseArgs(process.args) orelse return false;
@@ -91,7 +90,11 @@ pub fn runWorkerIfRequested(process: ProcessContext) !bool {
     return true;
 }
 
-pub fn run(process: ProcessContext, opts: Options) !void {
+pub fn run(process: ProcessContext, opts: RunOptions) !void {
+    var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_path_len = try std.process.executablePath(process.io, &exe_path_buf);
+    const exe_path = exe_path_buf[0..exe_path_len];
+
     var shutdown = try Shutdown.init(process.io);
     defer shutdown.deinit();
     try shutdown.start();
@@ -111,7 +114,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
     if (try shouldRunAutologin(opts.config)) {
         defer opts.config.vt.normalize(process.io, process.environ_map) catch {};
         if (Shutdown.shutdownRequested()) return;
-        try runAutologin(process, opts, &shutdown);
+        try runAutologin(process, exe_path, opts.config, &shutdown);
         if (Shutdown.shutdownRequested()) return;
     }
 
@@ -119,7 +122,7 @@ pub fn run(process: ProcessContext, opts: Options) !void {
         defer opts.config.vt.normalize(process.io, process.environ_map) catch {};
         if (Shutdown.shutdownRequested()) return;
 
-        const spawned = try spawnWorkers(process, opts, &shutdown);
+        const spawned = try spawnWorkers(process, exe_path, opts.config, &shutdown);
         defer {
             shutdown.requestStop(spawned.greeter, 0);
             shutdown.requestStop(spawned.session, 0);
@@ -146,15 +149,20 @@ pub fn run(process: ProcessContext, opts: Options) !void {
     }
 }
 
-fn spawnWorkers(process: ProcessContext, opts: Options, shutdown: *Shutdown) !SpawnedWorkers {
+fn spawnWorkers(
+    process: ProcessContext,
+    exe_path: []const u8,
+    config: Config,
+    shutdown: *Shutdown,
+) !SpawnedWorkers {
     const session_socks = try SocketPair.init();
     errdefer session_socks.parent.close(process.io);
-    const session_proc = try spawnWorker(process, opts, shutdown, .user, session_socks);
+    const session_proc = try spawnWorker(process, exe_path, config, shutdown, .user, session_socks);
     errdefer shutdown.stop(session_proc);
 
     const greeter_socks = try SocketPair.init();
     errdefer greeter_socks.parent.close(process.io);
-    const greeter_proc = try spawnWorker(process, opts, shutdown, .greeter, greeter_socks);
+    const greeter_proc = try spawnWorker(process, exe_path, config, shutdown, .greeter, greeter_socks);
     return .{
         .session = session_proc,
         .greeter = greeter_proc,
@@ -165,7 +173,8 @@ fn spawnWorkers(process: ProcessContext, opts: Options, shutdown: *Shutdown) !Sp
 
 fn spawnWorker(
     process: ProcessContext,
-    opts: Options,
+    exe_path: []const u8,
+    config: Config,
     shutdown: *Shutdown,
     session_class: worker.process.SessionClass,
     ipc_socks: ?SocketPair,
@@ -178,8 +187,8 @@ fn spawnWorker(
         .allocator = process.gpa,
         .io = process.io,
         .env_map = process.environ_map,
-        .worker_path = opts.self_exe_path,
-        .config = opts.config,
+        .worker_path = exe_path,
+        .config = config,
         .session_class = session_class,
         .ipc_file = if (ipc_socks) |socks| socks.child else null,
         .control_file = control.child,
@@ -191,12 +200,17 @@ fn spawnWorker(
     return shutdown.addWorker(proc, control.parent, if (ipc_socks) |socks| socks.parent else null);
 }
 
-fn runAutologin(process: ProcessContext, opts: Options, shutdown: *Shutdown) !void {
-    const autologin = opts.config.autologin;
+fn runAutologin(
+    process: ProcessContext,
+    exe_path: []const u8,
+    config: Config,
+    shutdown: *Shutdown,
+) !void {
+    const autologin = config.autologin;
 
     if (autologin.timeout_seconds != 0) {
-        try opts.config.vt.activate(process.io);
-        var watcher = opts.config.vt.watchInput(process.io, process.environ_map) catch |err| {
+        try config.vt.activate(process.io);
+        var watcher = config.vt.watchInput(process.io, process.environ_map) catch |err| {
             if (Shutdown.shutdownRequested()) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;
@@ -222,7 +236,7 @@ fn runAutologin(process: ProcessContext, opts: Options, shutdown: *Shutdown) !vo
     if (Shutdown.shutdownRequested()) return;
 
     log.debug("Spawning Autologin worker...", .{});
-    const autologin_proc = try spawnWorker(process, opts, shutdown, .autologin, null);
+    const autologin_proc = try spawnWorker(process, exe_path, config, shutdown, .autologin, null);
     defer shutdown.stop(autologin_proc);
 
     waitWorker(shutdown, autologin_proc) catch |err| {
