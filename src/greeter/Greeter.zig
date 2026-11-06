@@ -118,7 +118,7 @@ pub fn runPreview(self: Self, opts: preview.Options) !void {
 }
 
 fn runDaemon(self: Self) !void {
-    if (!build_options.embed_daemon) unreachable;
+    std.debug.assert(build_options.embed_daemon);
 
     var zgsld_config = Config{};
     var configure_arena = std.heap.ArenaAllocator.init(self.process.gpa);
