@@ -51,7 +51,7 @@ const app = Greeter.init(.fromInit(&init), .{
 
 ### `.run`
 
-Function Signature: `fn run(ctx: Greeter.GreeterContext) !void`
+Function Signature: `fn run(ctx: Greeter.RunContext) !void`
 
 The `run` callback is the main entry point for your greeter. It is called when using either an embedded or external daemon.
 

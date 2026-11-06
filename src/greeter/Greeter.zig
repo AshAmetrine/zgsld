@@ -33,7 +33,7 @@ process: ProcessContext,
 ipc_codec: *ipc.Codec = ipc.Codec.binary,
 
 /// Context passed to `VTable.run`.
-pub const GreeterContext = struct {
+pub const RunContext = struct {
     /// IPC connection to the daemon.
     ipc: *IpcConnection,
     gpa: std.mem.Allocator,
@@ -57,7 +57,7 @@ pub const ConfigureContext = struct {
 /// Integration callbacks implemented by the greeter.
 pub const VTable = struct {
     /// Runs the greeter
-    run: *const fn (ctx: GreeterContext) anyerror!void,
+    run: *const fn (ctx: RunContext) anyerror!void,
     /// Optional hook to override the embedded daemon's configuration.
     configure: ?*const fn (ctx: ConfigureContext) anyerror!void = null,
 };
@@ -174,7 +174,7 @@ fn runDaemon(self: Self) !void {
     });
 }
 
-fn greeterContext(self: Self, ipc_conn: *IpcConnection) GreeterContext {
+fn greeterContext(self: Self, ipc_conn: *IpcConnection) RunContext {
     return .{
         .ipc = ipc_conn,
         .gpa = self.process.gpa,
