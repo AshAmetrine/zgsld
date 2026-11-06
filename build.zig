@@ -78,7 +78,7 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "ipc", .module = ipc_mod },
         },
     });
-    const daemon = b.addModule("daemon", .{
+    const daemon_options: std.Build.Module.CreateOptions = .{
         .root_source_file = b.path("src/daemon.zig"),
         .target = target,
         .optimize = optimize,
@@ -89,8 +89,9 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "common", .module = common },
             .{ .name = "preview", .module = preview },
         },
-    });
-    const greeter = b.addModule("greeter", .{
+    };
+    const daemon = b.addModule("daemon", daemon_options);
+    const greeter_options: std.Build.Module.CreateOptions = .{
         .root_source_file = b.path("src/greeter.zig"),
         .target = target,
         .optimize = optimize,
@@ -100,18 +101,22 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "common", .module = common },
             .{ .name = "preview", .module = preview },
         },
-    });
+    };
+    const greeter = b.addModule("greeter", greeter_options);
     if (embed_daemon) {
         greeter.addImport("daemon", daemon);
     }
 
+    const docs_daemon = b.createModule(daemon_options);
+    const docs_greeter = b.createModule(greeter_options);
+    docs_greeter.addImport("daemon", docs_daemon);
     const docs_mod = b.createModule(.{
         .root_source_file = b.path("src/zgsld.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "greeter", .module = greeter },
-            .{ .name = "daemon", .module = daemon },
+            .{ .name = "greeter", .module = docs_greeter },
+            .{ .name = "daemon", .module = docs_daemon },
             .{ .name = "ipc", .module = ipc_mod },
         },
     });
