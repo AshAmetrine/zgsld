@@ -128,7 +128,7 @@ Choose the module for your project.
 For building greeter applications.
 
 ```zig
-exe.root_module.addImport("zgsld", zgsld.module("greeter"));
+exe.root_module.addImport("zgsld-greeter", zgsld.module("greeter"));
 ```
 
 #### Daemon
@@ -144,7 +144,7 @@ exe.root_module.addImport("zgsld", zgsld.module("daemon"));
 For implementing custom codecs.
 
 ```zig
-exe.root_module.addImport("zgsld", zgsld.module("ipc"));
+exe.root_module.addImport("zgsld-ipc", zgsld.module("ipc"));
 ```
 
 ### Build options
