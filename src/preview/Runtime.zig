@@ -4,50 +4,53 @@ const SocketPair = @import("common").SocketPair;
 const preview = @import("preview");
 const Self = @This();
 
-ipc_conn: ipc.Connection,
+client: Endpoint,
+server: Endpoint,
 thread: ?std.Thread,
-ctx: *ServerCtx,
+ctx: ServerCtx,
 
-pub const Options = struct {
-    codec: *ipc.Codec = ipc.Codec.binary,
-    preview: preview.Options = .{},
+const Endpoint = struct {
+    file: std.Io.File,
+    read_buf: [ipc.event_buf_size]u8 = undefined,
+    write_buf: [ipc.event_buf_size]u8 = undefined,
+    reader: std.Io.File.Reader,
+    writer: std.Io.File.Writer,
+    connection: ipc.Connection,
+
+    fn init(self: *Endpoint, io: std.Io, file: std.Io.File) void {
+        self.file = file;
+        self.reader = file.reader(io, &self.read_buf);
+        self.writer = file.writer(io, &self.write_buf);
+        self.connection = ipc.Connection.init(.{
+            .reader = &self.reader.interface,
+            .writer = &self.writer.interface,
+        }, .{});
+    }
 };
 
-pub const ServerCtx = struct {
+const ServerCtx = struct {
     io: std.Io,
-    conn: ipc.Connection,
+    endpoint: *Endpoint,
     opts: preview.Options,
-    result: anyerror!void,
+    result: anyerror!void = {},
 };
 
-pub fn init(io: std.Io, ctx: *ServerCtx, opts: Options) !Self {
+pub fn init(self: *Self, io: std.Io, opts: preview.Options) !void {
     const fds = try SocketPair.init();
+    errdefer fds.parent.close(io);
+    errdefer fds.child.close(io);
 
-    ctx.* = .{
-        .io = io,
-        .conn = ipc.Connection.init(fds.parent, .{ .codec = opts.codec }),
-        .opts = opts.preview,
-        .result = {},
-    };
-    errdefer ctx.conn.deinit(io);
-
-    var ipc_conn = ipc.Connection.init(fds.child, .{ .codec = opts.codec });
-    errdefer ipc_conn.deinit(io);
-
-    const thread = try std.Thread.spawn(.{}, ipcThreadMain, .{ctx});
-
-    return .{
-        .ipc_conn = ipc_conn,
-        .thread = thread,
-        .ctx = ctx,
-    };
+    self.client.init(io, fds.child);
+    self.server.init(io, fds.parent);
+    self.ctx = .{ .io = io, .endpoint = &self.server, .opts = opts };
+    self.thread = try std.Thread.spawn(.{}, ipcThreadMain, .{&self.ctx});
 }
 
 pub fn closeAndJoin(self: *Self) !void {
     const thread = self.thread orelse return;
     self.thread = null;
 
-    self.ipc_conn.deinit(self.ctx.io);
+    self.client.file.close(self.ctx.io);
     thread.join();
 
     return self.ctx.result;
@@ -58,6 +61,6 @@ pub fn deinit(self: *Self) void {
 }
 
 fn ipcThreadMain(ctx: *ServerCtx) void {
-    defer ctx.conn.deinit(ctx.io);
-    ctx.result = preview.run(ctx.io, &ctx.conn, ctx.opts);
+    defer ctx.endpoint.file.close(ctx.io);
+    ctx.result = preview.run(ctx.io, &ctx.endpoint.connection, ctx.opts);
 }

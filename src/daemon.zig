@@ -13,14 +13,15 @@ const ForwardIpcCtx = struct {
     io: std.Io,
     src: *ipc.Connection,
     dst: *ipc.Connection,
-    writer: *std.Io.Writer,
+    src_file: std.Io.File,
+    dst_file: std.Io.File,
     mutex: std.Io.Mutex = .init,
     authenticated: bool = false,
     result: anyerror!void = {},
 
     fn sendEvent(self: *ForwardIpcCtx, event: ipc.Event) !void {
-        try self.dst.writeEvent(self.writer, &event);
-        try self.writer.flush();
+        try self.dst.writeEvent(&event);
+        try self.dst.transport.writer.flush();
     }
 
     fn acceptSession(self: *ForwardIpcCtx, info: ipc.SessionInfo) !bool {
@@ -58,14 +59,14 @@ const ReplyWriter = struct {
             self.ctx.mutex.lockUncancelable(self.ctx.io);
             self.locked = true;
         }
-        return self.ctx.writer.writeSplat(data, splat);
+        return self.ctx.dst.transport.writer.writeSplat(data, splat);
     }
 
     fn flush(writer: *std.Io.Writer) !void {
         const self: *ReplyWriter = @fieldParentPtr("writer", writer);
         if (!self.locked) return;
         defer self.unlock();
-        try self.ctx.writer.flush();
+        try self.ctx.dst.transport.writer.flush();
     }
 };
 
@@ -285,19 +286,34 @@ fn forwardIpc(
         shutdown.requestStop(greeter_worker_proc, 0);
         shutdown.requestStop(session_worker_proc, 0);
     };
-    var greeter_conn = ipc.Connection.init(greeter_file, .{ .codec = ipc_codec });
-    defer greeter_conn.deinit(io);
-    var worker_conn = ipc.Connection.init(worker_file, .{});
-    defer worker_conn.deinit(io);
+    defer greeter_file.close(io);
+    defer worker_file.close(io);
 
-    var reply_buf: [ipc.event_buf_size]u8 = undefined;
-    var reply_writer = greeter_conn.writer(io, &reply_buf);
+    var greeter_rbuf: [ipc.event_buf_size]u8 = undefined;
+    var greeter_wbuf: [ipc.event_buf_size]u8 = undefined;
+    var worker_rbuf: [ipc.event_buf_size]u8 = undefined;
+    var worker_wbuf: [ipc.event_buf_size]u8 = undefined;
+    var greeter_reader = greeter_file.reader(io, &greeter_rbuf);
+    var greeter_writer = greeter_file.writer(io, &greeter_wbuf);
+    var worker_reader = worker_file.reader(io, &worker_rbuf);
+    var worker_writer = worker_file.writer(io, &worker_wbuf);
+
+    var greeter_conn = ipc.Connection.init(.{
+        .reader = &greeter_reader.interface,
+        .writer = &greeter_writer.interface,
+    }, .{ .codec = ipc_codec });
+    var worker_conn = ipc.Connection.init(.{
+        .reader = &worker_reader.interface,
+        .writer = &worker_writer.interface,
+    }, .{});
     var worker_to_greeter = ForwardIpcCtx{
         .io = io,
         .src = &worker_conn,
         .dst = &greeter_conn,
-        .writer = &reply_writer.interface,
+        .src_file = worker_file,
+        .dst_file = greeter_file,
     };
+    var replies = ReplyWriter{ .ctx = &worker_to_greeter };
 
     const worker_to_greeter_thread = try std.Thread.spawn(
         .{},
@@ -306,25 +322,16 @@ fn forwardIpc(
     );
     {
         defer {
-            _ = std.c.shutdown(greeter_conn.file.handle, 2);
-            _ = std.c.shutdown(worker_conn.file.handle, 2);
+            _ = std.c.shutdown(greeter_file.handle, 2);
+            _ = std.c.shutdown(worker_file.handle, 2);
             worker_to_greeter_thread.join();
         }
 
         var event_buf: [ipc.event_buf_size]u8 = undefined;
-        var rbuf: [ipc.event_buf_size]u8 = undefined;
-        var wbuf: [ipc.event_buf_size]u8 = undefined;
-
-        var reader = greeter_conn.reader(io, &rbuf);
-        var writer = worker_conn.writer(io, &wbuf);
-        const io_reader = &reader.interface;
-        const io_writer = &writer.interface;
-        var replies = ReplyWriter{ .ctx = &worker_to_greeter };
-
         while (true) {
             const read_result = blk: {
                 defer replies.unlock();
-                break :blk greeter_conn.readEvent(io_reader, &replies.writer, &event_buf);
+                break :blk ipc_codec.readEvent(&greeter_reader.interface, &replies.writer, &event_buf);
             };
             const event = read_result catch |err| switch (err) {
                 error.EndOfStream => break,
@@ -346,8 +353,8 @@ fn forwardIpc(
                 else => {},
             }
 
-            try worker_conn.writeEvent(io_writer, &event);
-            try io_writer.flush();
+            try worker_conn.writeEvent(&event);
+            try worker_conn.transport.writer.flush();
         }
     }
 
@@ -371,24 +378,16 @@ fn waitWorker(shutdown: *Shutdown, proc: *Shutdown.Worker) !void {
 
 fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
     defer {
-        _ = std.c.shutdown(ctx.src.file.handle, 2);
-        _ = std.c.shutdown(ctx.dst.file.handle, 2);
+        _ = std.c.shutdown(ctx.src_file.handle, 2);
+        _ = std.c.shutdown(ctx.dst_file.handle, 2);
     }
     ctx.result = forwardIpcEvents(ctx);
 }
 
 fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
     var event_buf: [ipc.event_buf_size]u8 = undefined;
-    var rbuf: [ipc.event_buf_size]u8 = undefined;
-    var wbuf: [ipc.event_buf_size]u8 = undefined;
-
-    var reader = ctx.src.reader(ctx.io, &rbuf);
-    var writer = ctx.src.writer(ctx.io, &wbuf);
-    const io_reader = &reader.interface;
-    const io_writer = &writer.interface;
-
     while (true) {
-        const event = ctx.src.readEvent(io_reader, io_writer, &event_buf) catch |err| switch (err) {
+        const event = ctx.src.readEvent(&event_buf) catch |err| switch (err) {
             error.EndOfStream => return,
             else => return err,
         };

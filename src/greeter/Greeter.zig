@@ -1,12 +1,12 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const fd_utils = @import("common").fd;
 const Config = @import("common").Config;
 const ProcessContext = @import("common").ProcessContext;
 const daemon = if (build_options.embed_daemon) @import("daemon") else void;
 const ipc = @import("ipc");
 const preview = @import("preview");
 const PreviewRuntime = @import("../preview/Runtime.zig");
+const ZgsldConnector = @import("ZgsldConnector.zig");
 
 const IpcConnection = ipc.Connection;
 const log = std.log.scoped(.zgsld);
@@ -30,7 +30,6 @@ fn appendShellQuotedArg(
 
 vtable: *const VTable,
 process: ProcessContext,
-ipc_codec: *ipc.Codec = ipc.Codec.binary,
 
 /// Context passed to `VTable.run`.
 pub const RunContext = struct {
@@ -63,7 +62,6 @@ pub const VTable = struct {
 };
 
 pub const Options = struct {
-    ipc_codec: *ipc.Codec = ipc.Codec.binary,
     vtable: *const VTable,
 };
 
@@ -71,28 +69,27 @@ pub fn init(process: ProcessContext, opts: Options) Self {
     return .{
         .vtable = opts.vtable,
         .process = process,
-        .ipc_codec = opts.ipc_codec,
     };
 }
 
-pub fn run(self: Self) !void {
+pub const RunOptions = struct {
+    ipc_conn: ?*IpcConnection = null,
+};
+
+pub fn run(self: Self, opts: RunOptions) !void {
     if (build_options.embed_daemon) {
         if (try daemon.runWorkerIfRequested(self.process)) return;
     }
 
-    if (self.process.environ_map.get("ZGSLD_SOCK")) |sock| {
-        const fd = try std.fmt.parseInt(std.posix.fd_t, sock, 10);
-        try fd_utils.setCloseOnExec(fd);
+    if (opts.ipc_conn) |connection| {
+        return self.vtable.run(self.greeterContext(connection));
+    }
 
-        var ipc_conn = IpcConnection.init(.{
-            .handle = fd,
-            .flags = .{ .nonblocking = false },
-        }, .{ .codec = self.ipc_codec });
-        defer ipc_conn.deinit(self.process.io);
-
-        try self.vtable.run(self.greeterContext(&ipc_conn));
-
-        return;
+    var connector = ZgsldConnector.init(self.process);
+    defer connector.deinit();
+    if (try connector.connect()) |transport| {
+        var connection = IpcConnection.init(transport, .{});
+        return self.vtable.run(self.greeterContext(&connection));
     }
 
     if (build_options.embed_daemon) {
@@ -105,14 +102,11 @@ pub fn run(self: Self) !void {
 
 /// Runs the greeter against a mock IPC daemon.
 pub fn runPreview(self: Self, opts: preview.Options) !void {
-    var ctx: PreviewRuntime.ServerCtx = undefined;
-    var runtime = try PreviewRuntime.init(self.process.io, &ctx, .{
-        .codec = self.ipc_codec,
-        .preview = opts,
-    });
+    var runtime: PreviewRuntime = undefined;
+    try runtime.init(self.process.io, opts);
     defer runtime.deinit();
 
-    try self.vtable.run(self.greeterContext(&runtime.ipc_conn));
+    try self.vtable.run(self.greeterContext(&runtime.client.connection));
 
     try runtime.closeAndJoin();
 }
@@ -169,7 +163,6 @@ fn runDaemon(self: Self) !void {
     });
 
     try daemon.run(self.process, .{
-        .ipc_codec = self.ipc_codec,
         .config = zgsld_config,
     });
 }

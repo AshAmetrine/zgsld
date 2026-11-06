@@ -5,7 +5,7 @@ const autologin = @import("runtime/autologin.zig");
 const greeter = @import("runtime/greeter.zig");
 const login = @import("runtime/login.zig");
 const signals = @import("runtime/signals.zig");
-const Connection = @import("../Shutdown/Connection.zig");
+const Shutdown = @import("../Shutdown.zig");
 const Vt = @import("vt").Vt;
 const SessionClass = @import("process.zig").SessionClass;
 
@@ -44,14 +44,14 @@ pub fn run(
     opts: Options,
 ) !void {
     signals.installHandlers();
-    const control_raw = environ_map.get("ZGSLD_CONTROL") orelse
+    const shutdown_raw = environ_map.get("ZGSLD_CONTROL") orelse
         return error.MissingControlFd;
-    const control_fd = try std.fmt.parseInt(std.posix.fd_t, control_raw, 10);
-    var control = try Connection.init(io, .{
-        .handle = control_fd,
+    const shutdown_fd = try std.fmt.parseInt(std.posix.fd_t, shutdown_raw, 10);
+    var shutdown_conn = try Shutdown.Connection.init(io, .{
+        .handle = shutdown_fd,
         .flags = .{ .nonblocking = false },
     });
-    defer control.deinit();
+    defer shutdown_conn.deinit();
 
     const vt = try Vt.parse(environ_map.get("ZGSLD_VT"));
 
@@ -70,7 +70,7 @@ pub fn run(
             try greeter.run(.{
                 .allocator = gpa,
                 .io = io,
-                .control = &control,
+                .shutdown_conn = &shutdown_conn,
                 .env_map = environ_map,
                 .service_name = opts.service_name,
                 .username = opts.greeter_username.?,
@@ -84,17 +84,16 @@ pub fn run(
             const sock_fd = try parseZgsldSock(environ_map);
             try fd_utils.setCloseOnExec(sock_fd);
 
-            var ipc_conn = ipc.Connection.init(.{
-                .handle = sock_fd,
-                .flags = .{ .nonblocking = false },
-            }, .{});
             try login.run(.{
                 .allocator = gpa,
                 .io = io,
-                .control = &control,
+                .shutdown_conn = &shutdown_conn,
                 .env_map = environ_map,
                 .service_name = opts.service_name,
-                .ipc_conn = &ipc_conn,
+                .ipc_socket = .{
+                    .handle = sock_fd,
+                    .flags = .{ .nonblocking = false },
+                },
                 .vt = vt,
             });
         },
@@ -116,7 +115,7 @@ pub fn run(
             try autologin.run(.{
                 .allocator = gpa,
                 .io = io,
-                .control = &control,
+                .shutdown_conn = &shutdown_conn,
                 .env_map = environ_map,
                 .service_name = opts.service_name,
                 .user = autologin_user_z,

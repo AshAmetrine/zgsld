@@ -6,7 +6,7 @@ const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
 const Vt = @import("vt").Vt;
-const Connection = @import("../../Shutdown/Connection.zig");
+const Shutdown = @import("../../Shutdown.zig");
 
 const PamCtx = pam_conv.PamCtx;
 
@@ -22,10 +22,10 @@ const SessionEnvKey = enum {
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
-    control: *Connection,
+    shutdown_conn: *Shutdown.Connection,
     env_map: *const std.process.Environ.Map,
     service_name: [:0]const u8,
-    ipc_conn: *ipc.Connection,
+    ipc_socket: std.Io.File,
     vt: Vt,
 };
 
@@ -36,27 +36,31 @@ const SessionSetup = struct {
 
 pub fn run(opts: RunOpts) !void {
     var ipc_closed = false;
-    defer if (!ipc_closed) opts.ipc_conn.deinit(opts.io);
+    defer if (!ipc_closed) opts.ipc_socket.close(opts.io);
 
     var saw_auth = false;
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     var rbuf: [ipc.event_buf_size]u8 = undefined;
     var wbuf: [ipc.event_buf_size]u8 = undefined;
-    var reader_impl = opts.ipc_conn.reader(opts.io, &rbuf);
-    var writer_impl = opts.ipc_conn.writer(opts.io, &wbuf);
-    const ipc_reader = &reader_impl.interface;
-    const ipc_writer = &writer_impl.interface;
+    var reader_impl = opts.ipc_socket.reader(opts.io, &rbuf);
+    var writer_impl = opts.ipc_socket.writer(opts.io, &wbuf);
+    var connection = ipc.Connection.init(.{
+        .reader = &reader_impl.interface,
+        .writer = &writer_impl.interface,
+    }, .{});
+    const ipc_conn = &connection;
+    const ipc_writer = connection.transport.writer;
     var cancelled = false;
 
     while (true) {
         // Confirm cleanup has finished after login_cancel.
         if (cancelled) {
-            try opts.ipc_conn.writeEvent(ipc_writer, &.login_cancelled);
+            try ipc_conn.writeEvent(&.login_cancelled);
             try ipc_writer.flush();
             cancelled = false;
         }
         log.debug("Waiting for event", .{});
-        const event = opts.ipc_conn.readEvent(ipc_reader, ipc_writer, &event_buf) catch |err| {
+        const event = ipc_conn.readEvent(&event_buf) catch |err| {
             if (err == error.EndOfStream and !saw_auth) {
                 if (signals.shutdownRequested()) return;
                 std.process.exit(2);
@@ -72,9 +76,7 @@ pub fn run(opts: RunOpts) !void {
             .pam_start_auth => |auth| {
                 saw_auth = true;
                 var pam_ctx: PamCtx = .{
-                    .ipc_conn = opts.ipc_conn,
-                    .reader = ipc_reader,
-                    .writer = ipc_writer,
+                    .ipc_conn = ipc_conn,
                 };
 
                 const user_z = opts.allocator.dupeSentinel(u8, auth.user, 0) catch |err| {
@@ -141,9 +143,7 @@ pub fn run(opts: RunOpts) !void {
 
                 var session_setup = try getSession(
                     opts.allocator,
-                    opts.ipc_conn,
-                    ipc_reader,
-                    ipc_writer,
+                    ipc_conn,
                     &event_buf,
                 ) orelse {
                     cancelled = true;
@@ -153,12 +153,12 @@ pub fn run(opts: RunOpts) !void {
                     session_setup.env.deinit();
                     return;
                 }
-                opts.ipc_conn.deinit(opts.io);
+                opts.ipc_socket.close(opts.io);
                 ipc_closed = true;
                 try runSession(
                     opts.allocator,
                     opts.io,
-                    opts.control,
+                    opts.shutdown_conn,
                     opts.env_map,
                     user_z,
                     session_setup.info,
@@ -192,29 +192,27 @@ fn checkPamResult(ctx: *const PamCtx, result: PamError!void) !void {
 
 fn reportInternalError(ctx: *PamCtx, err: anyerror) !void {
     log.err("Authentication internal error: {s}", .{@errorName(err)});
-    try ctx.ipc_conn.writeEvent(ctx.writer, &.{ .err = .{
+    try ctx.ipc_conn.writeEvent(&.{ .err = .{
         .code = .internal_error,
     } });
-    try ctx.writer.flush();
+    try ctx.ipc_conn.transport.writer.flush();
 }
 
 fn writeAuthResult(pam_ctx: *PamCtx, ok: bool) !void {
-    try pam_ctx.ipc_conn.writeEvent(pam_ctx.writer, &.{ .pam_auth_result = .{ .ok = ok } });
-    try pam_ctx.writer.flush();
+    try pam_ctx.ipc_conn.writeEvent(&.{ .pam_auth_result = .{ .ok = ok } });
+    try pam_ctx.ipc_conn.transport.writer.flush();
 }
 
 fn getSession(
     allocator: std.mem.Allocator,
     ipc_conn: *ipc.Connection,
-    ipc_reader: *std.Io.Reader,
-    ipc_writer: *std.Io.Writer,
     event_buf: *[ipc.event_buf_size]u8,
 ) !?SessionSetup {
     var session_envmap = std.process.Environ.Map.init(allocator);
     errdefer session_envmap.deinit();
 
     while (true) {
-        const session_event = ipc_conn.readEvent(ipc_reader, ipc_writer, event_buf) catch |err| {
+        const session_event = ipc_conn.readEvent(event_buf) catch |err| {
             if (err == error.EndOfStream and signals.shutdownRequested()) {
                 std.process.exit(0);
             }
@@ -244,7 +242,7 @@ fn getSession(
 fn runSession(
     allocator: std.mem.Allocator,
     io: std.Io,
-    control: *Connection,
+    shutdown_conn: *Shutdown.Connection,
     env_map: *const std.process.Environ.Map,
     user_z: [:0]const u8,
     info: ipc.SessionInfo,
@@ -263,7 +261,7 @@ fn runSession(
             PamCtx,
             allocator,
             io,
-            control,
+            shutdown_conn,
             env_map,
             user_z,
             info,
@@ -277,5 +275,5 @@ fn runSession(
     defer started.session.deinit(io);
 
     log.debug("Waiting for session to end...", .{});
-    try control.wait(&started.session.child, .session);
+    try shutdown_conn.wait(&started.session.child, .session);
 }

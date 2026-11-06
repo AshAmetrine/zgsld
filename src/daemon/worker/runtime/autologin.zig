@@ -3,12 +3,12 @@ const ipc = @import("ipc");
 const session_mod = @import("session.zig");
 const Pam = @import("pam").Pam;
 const Vt = @import("vt").Vt;
-const Connection = @import("../../Shutdown/Connection.zig");
+const Shutdown = @import("../../Shutdown.zig");
 
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
-    control: *Connection,
+    shutdown_conn: *Shutdown.Connection,
     env_map: *const std.process.Environ.Map,
     service_name: [:0]const u8,
     user: [:0]const u8,
@@ -45,7 +45,7 @@ pub fn run(opts: RunOpts) !void {
             void,
             opts.allocator,
             opts.io,
-            opts.control,
+            opts.shutdown_conn,
             opts.env_map,
             opts.user,
             opts.info,
@@ -56,5 +56,5 @@ pub fn run(opts: RunOpts) !void {
     };
     defer session.deinit(opts.io);
 
-    try opts.control.wait(&session.child, .session);
+    try opts.shutdown_conn.wait(&session.child, .session);
 }

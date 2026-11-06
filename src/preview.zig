@@ -123,21 +123,14 @@ const Conversation = struct {
     opts: Options,
 };
 
-pub fn run(io: std.Io, connection: *ipc.Connection, options: Options) !void {
+pub fn run(_: std.Io, connection: *ipc.Connection, options: Options) !void {
     var conversation: Conversation = .{ .conn = connection, .opts = options };
     const ctx = &conversation;
     var event_buf: [ipc.event_buf_size]u8 = undefined;
-    var rbuf: [ipc.event_buf_size]u8 = undefined;
-    var wbuf: [ipc.event_buf_size]u8 = undefined;
     var authenticated = false;
 
-    var reader = connection.reader(io, &rbuf);
-    var writer = connection.writer(io, &wbuf);
-    const io_reader = &reader.interface;
-    const io_writer = &writer.interface;
-
     while (true) {
-        const read_result = ctx.conn.readEvent(io_reader, io_writer, &event_buf);
+        const read_result = ctx.conn.readEvent(&event_buf);
         const event = read_result catch |err| switch (err) {
             error.EndOfStream => return,
             else => return err,
@@ -146,15 +139,15 @@ pub fn run(io: std.Io, connection: *ipc.Connection, options: Options) !void {
         switch (event) {
             .login_cancel => {
                 authenticated = false;
-                try sendEvent(ctx, io_writer, &.login_cancelled);
+                try sendEvent(ctx, &.login_cancelled);
             },
             .pam_start_auth => |auth| {
                 if (authenticated) {
                     return error.UnexpectedPreviewEvent;
                 }
-                const state = try runAuthSequence(ctx, auth.user, io_reader, io_writer, &event_buf);
+                const state = try runAuthSequence(ctx, auth.user, &event_buf);
                 authenticated = state == .ok;
-                if (state == .cancelled) try sendEvent(ctx, io_writer, &.login_cancelled);
+                if (state == .cancelled) try sendEvent(ctx, &.login_cancelled);
             },
             .set_session_env => {
                 if (!authenticated) return error.UnexpectedPreviewEvent;
@@ -162,10 +155,10 @@ pub fn run(io: std.Io, connection: *ipc.Connection, options: Options) !void {
             .start_session => |info| {
                 if (!authenticated) return error.UnexpectedPreviewEvent;
                 info.validate(build_options.x11_support) catch {
-                    try sendEvent(ctx, io_writer, &.{ .err = .{ .code = .invalid_request } });
+                    try sendEvent(ctx, &.{ .err = .{ .code = .invalid_request } });
                     continue;
                 };
-                try sendEvent(ctx, io_writer, &.session_accepted);
+                try sendEvent(ctx, &.session_accepted);
                 return;
             },
             else => return error.UnexpectedPreviewEvent,
@@ -176,8 +169,6 @@ pub fn run(io: std.Io, connection: *ipc.Connection, options: Options) !void {
 fn runAuthSequence(
     ctx: *Conversation,
     user: []const u8,
-    io_reader: *std.Io.Reader,
-    io_writer: *std.Io.Writer,
     event_buf: []u8,
 ) !AuthState {
     const expected_user_matches = if (ctx.opts.expected_user) |expected_user|
@@ -189,29 +180,25 @@ fn runAuthSequence(
     const auth_state = try runSteps(
         ctx,
         ctx.opts.authenticate_steps,
-        io_reader,
-        io_writer,
         event_buf,
         &step_state,
     );
     if (auth_state == .cancelled or auth_state == .internal_error) return auth_state;
 
     if (auth_state == .failed or !expected_user_matches) {
-        try sendEvent(ctx, io_writer, &.{ .pam_auth_result = .{ .ok = false } });
+        try sendEvent(ctx, &.{ .pam_auth_result = .{ .ok = false } });
         return .failed;
     }
 
     const post_auth_state = try runSteps(
         ctx,
         ctx.opts.post_auth_steps,
-        io_reader,
-        io_writer,
         event_buf,
         &step_state,
     );
     if (post_auth_state == .cancelled or post_auth_state == .internal_error) return post_auth_state;
 
-    try sendEvent(ctx, io_writer, &.{ .pam_auth_result = .{ .ok = post_auth_state == .ok } });
+    try sendEvent(ctx, &.{ .pam_auth_result = .{ .ok = post_auth_state == .ok } });
 
     return post_auth_state;
 }
@@ -219,26 +206,24 @@ fn runAuthSequence(
 fn runSteps(
     ctx: *Conversation,
     steps: []const Step,
-    io_reader: *std.Io.Reader,
-    io_writer: *std.Io.Writer,
     event_buf: []u8,
     step_state: *StepState,
 ) !AuthState {
     for (steps) |step| {
         switch (step) {
             .internal_error => {
-                try sendEvent(ctx, io_writer, &.{ .err = .{
+                try sendEvent(ctx, &.{ .err = .{
                     .code = .internal_error,
                 } });
                 return .internal_error;
             },
             .pam_message => |info| {
-                try sendEvent(ctx, io_writer, &.{ .pam_message = info });
+                try sendEvent(ctx, &.{ .pam_message = info });
             },
             .pam_challenge => |challenge| {
-                try sendEvent(ctx, io_writer, &.{ .pam_request = challenge.request });
+                try sendEvent(ctx, &.{ .pam_request = challenge.request });
 
-                const response = try ctx.conn.readEvent(io_reader, io_writer, event_buf);
+                const response = try ctx.conn.readEvent(event_buf);
                 switch (response) {
                     .pam_response => |resp| {
                         const response_matches = switch (challenge.expected_response) {
@@ -252,7 +237,7 @@ fn runSteps(
                             },
                         };
                         if (!response_matches) {
-                            try emitFailureMessages(ctx, io_writer, challenge.on_failure);
+                            try emitFailureMessages(ctx, challenge.on_failure);
                             return .failed;
                         }
 
@@ -272,8 +257,6 @@ fn runSteps(
                     const retry_result = try runSteps(
                         ctx,
                         retry.steps,
-                        io_reader,
-                        io_writer,
                         event_buf,
                         &attempt_state,
                     );
@@ -299,19 +282,17 @@ fn runSteps(
 
 fn emitFailureMessages(
     ctx: *Conversation,
-    io_writer: *std.Io.Writer,
     messages: []const ipc.PamMessage,
 ) !void {
     for (messages) |message| {
-        try sendEvent(ctx, io_writer, &.{ .pam_message = message });
+        try sendEvent(ctx, &.{ .pam_message = message });
     }
 }
 
 fn sendEvent(
     ctx: *Conversation,
-    io_writer: *std.Io.Writer,
     event: *const ipc.Event,
 ) !void {
-    try ctx.conn.writeEvent(io_writer, event);
-    try io_writer.flush();
+    try ctx.conn.writeEvent(event);
+    try ctx.conn.transport.writer.flush();
 }

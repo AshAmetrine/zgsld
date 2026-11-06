@@ -6,8 +6,6 @@ pub const PamCtx = struct {
     cancelled: bool = false,
     conv_error: ?anyerror = null,
     ipc_conn: *ipc.Connection,
-    reader: *std.Io.Reader,
-    writer: *std.Io.Writer,
 };
 
 pub fn loginConv(
@@ -24,8 +22,7 @@ pub fn loginConv(
 }
 
 fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
-    const ipc_reader = ctx.reader;
-    const ipc_writer = ctx.writer;
+    const ipc_writer = ctx.ipc_conn.transport.writer;
 
     var ipc_buf: [ipc.event_buf_size]u8 = undefined;
     defer std.crypto.secureZero(u8, &ipc_buf);
@@ -34,7 +31,7 @@ fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
     while (try iter.next()) |msg| {
         switch (msg) {
             .prompt_echo_off, .prompt_echo_on => |m| {
-                try ctx.ipc_conn.writeEvent(ipc_writer, &.{
+                try ctx.ipc_conn.writeEvent(&.{
                     .pam_request = .{
                         .echo = msg == .prompt_echo_on,
                         .message = m.message,
@@ -42,7 +39,7 @@ fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
                 });
                 try ipc_writer.flush();
 
-                const event = try ctx.ipc_conn.readEvent(ipc_reader, ipc_writer, &ipc_buf);
+                const event = try ctx.ipc_conn.readEvent(&ipc_buf);
                 switch (event) {
                     .pam_response => |resp_bytes| {
                         try m.respond(resp_bytes);
@@ -55,7 +52,7 @@ fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
                 }
             },
             .text_info, .error_msg => |m| {
-                try ctx.ipc_conn.writeEvent(ipc_writer, &.{
+                try ctx.ipc_conn.writeEvent(&.{
                     .pam_message = .{
                         .is_error = msg == .error_msg,
                         .message = m,

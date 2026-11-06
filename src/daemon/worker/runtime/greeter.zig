@@ -5,14 +5,14 @@ const Pam = @import("pam").Pam;
 const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
 const Vt = @import("vt").Vt;
-const Connection = @import("../../Shutdown/Connection.zig");
+const Shutdown = @import("../../Shutdown.zig");
 
 const Session = session_mod.Session;
 
 pub const RunOpts = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
-    control: *Connection,
+    shutdown_conn: *Shutdown.Connection,
     env_map: *const std.process.Environ.Map,
     username: [:0]const u8,
     service_name: [:0]const u8,
@@ -68,7 +68,7 @@ pub fn run(opts: RunOpts) !void {
 
         break :blk try Session.spawn(opts.allocator, .{
             .io = opts.io,
-            .control = opts.control,
+            .shutdown_conn = opts.shutdown_conn,
             .host_env_map = opts.env_map,
             .session_info = session_info,
             .envmap = &envmap,
@@ -79,5 +79,5 @@ pub fn run(opts: RunOpts) !void {
     };
     defer session.deinit(opts.io);
 
-    try opts.control.wait(&session.child, .session);
+    try opts.shutdown_conn.wait(&session.child, .session);
 }

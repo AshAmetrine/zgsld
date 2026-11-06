@@ -128,48 +128,37 @@ pub const Codec = struct {
     }
 };
 
-/// Socket-backed IPC transport with event encode/decode helpers.
+pub const Transport = struct {
+    reader: *std.Io.Reader,
+    writer: *std.Io.Writer,
+};
+
+pub const Connector = struct {
+    connect: *const fn (*Connector) anyerror!Transport,
+};
+
+/// IPC event encoding and decoding over borrowed streams.
 pub const Connection = struct {
     const Self = @This();
 
-    file: std.Io.File,
+    transport: Transport,
     codec: *Codec = Codec.binary,
 
     pub const Options = struct {
         codec: *Codec = Codec.binary,
     };
 
-    /// `Connection.deinit` closes `file`. The codec must outlive the connection.
-    pub fn init(file: std.Io.File, opts: Options) Self {
-        return .{ .file = file, .codec = opts.codec };
-    }
-
-    /// Closes the underlying socket/file.
-    pub fn deinit(self: *Self, io: std.Io) void {
-        self.file.close(io);
-    }
-
-    /// Creates a buffered file reader using caller-provided buffer.
-    pub fn reader(self: *Self, io: std.Io, buffer: []u8) std.Io.File.Reader {
-        return self.file.reader(io, buffer);
-    }
-
-    /// Creates a buffered file writer using caller-provided buffer.
-    pub fn writer(self: *Self, io: std.Io, buffer: []u8) std.Io.File.Writer {
-        return self.file.writer(io, buffer);
+    /// The transport streams, their backing storage, and codec must outlive the connection.
+    pub fn init(transport: Transport, opts: Options) Self {
+        return .{ .transport = transport, .codec = opts.codec };
     }
 
     /// Reads an event using a reader and writer for this connection.
-    pub fn readEvent(
-        self: *Self,
-        io_reader: *std.Io.Reader,
-        io_writer: *std.Io.Writer,
-        event_buf: []u8,
-    ) !Event {
-        return self.codec.readEvent(io_reader, io_writer, event_buf);
+    pub fn readEvent(self: *Self, event_buf: []u8) !Event {
+        return self.codec.readEvent(self.transport.reader, self.transport.writer, event_buf);
     }
 
-    pub fn writeEvent(self: *Self, io_writer: *std.Io.Writer, event: *const Event) !void {
-        return self.codec.writeEvent(io_writer, event);
+    pub fn writeEvent(self: *Self, event: *const Event) !void {
+        return self.codec.writeEvent(self.transport.writer, event);
     }
 };
