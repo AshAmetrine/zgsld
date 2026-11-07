@@ -100,10 +100,15 @@ pub fn run(self: Self, opts: RunOptions) !void {
     }
 }
 
+pub const PreviewOptions = struct {
+    codecs: ?preview.Codecs = null,
+    preview: preview.Options = .{},
+};
+
 /// Runs the greeter against a mock IPC daemon.
-pub fn runPreview(self: Self, opts: preview.Options) !void {
+pub fn runPreview(self: Self, opts: PreviewOptions) !void {
     var runtime: PreviewRuntime = undefined;
-    try runtime.init(self.process.io, opts);
+    try runtime.init(self.process.io, opts.codecs, opts.preview);
     defer runtime.deinit();
 
     try self.vtable.run(self.greeterContext(&runtime.client.connection));

@@ -23,6 +23,11 @@ pub const change_auth_token_steps = [_]Step{
     }),
 };
 
+pub const Codecs = struct {
+    greeter: *ipc.Codec,
+    daemon: *ipc.Codec,
+};
+
 pub const Options = struct {
     authenticate_steps: []const Step = &password_auth_steps,
     post_auth_steps: []const Step = &.{},
