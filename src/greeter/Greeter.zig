@@ -75,10 +75,16 @@ pub const RunOptions = struct {
     ipc_conn: ?*ipc.Connection = null,
 };
 
+/// Handles daemon worker startup when the daemon is embedded.
+/// Return from main when this returns true. Non-embedded builds return false.
+/// Calling this early is optional; run() also calls this automatically.
+pub fn runWorkerIfRequested(self: Self) !bool {
+    if (build_options.embed_daemon) return daemon.runWorkerIfRequested(self.process);
+    return false;
+}
+
 pub fn run(self: Self, opts: RunOptions) !void {
-    if (build_options.embed_daemon) {
-        if (try daemon.runWorkerIfRequested(self.process)) return;
-    }
+    if (try self.runWorkerIfRequested()) return;
 
     if (opts.ipc_conn) |connection| {
         return self.vtable.run(self.greeterContext(connection));
