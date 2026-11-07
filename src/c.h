@@ -1,4 +1,5 @@
 #include <sys/ioctl.h>
+#include <termios.h>
 
 #if defined(__linux__)
 #include <linux/vt.h>

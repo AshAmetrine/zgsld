@@ -161,31 +161,25 @@ pub const Vt = union(enum) {
         var tty_file = self.open(io, env_map, .read_write) catch return;
         defer if (tty_file.handle > 2) tty_file.close(io);
 
-        var termios = std.posix.tcgetattr(tty_file.handle) catch return;
-        termios.lflag.ISIG = true;
-        termios.lflag.ICANON = true;
-        termios.lflag.ECHO = true;
-        termios.lflag.ECHONL = true;
-        std.posix.tcsetattr(tty_file.handle, .FLUSH, termios) catch {};
+        var termios = tcgetattr(tty_file.handle) catch return;
+        termios.c_lflag |= c.ISIG | c.ICANON | c.ECHO | c.ECHONL;
+        tcsetattr(tty_file.handle, termios) catch {};
     }
 
     pub const InputWatcher = struct {
         file: std.Io.File,
-        original: std.posix.termios,
+        original: c.struct_termios,
 
         pub fn init(target_vt: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !InputWatcher {
             var tty_file = try target_vt.open(io, env_map, .read_write);
             errdefer tty_file.close(io);
 
-            const original = try std.posix.tcgetattr(tty_file.handle);
+            const original = try tcgetattr(tty_file.handle);
             var raw = original;
-            raw.lflag.ICANON = false;
-            raw.lflag.ECHO = false;
-            raw.lflag.ECHONL = false;
-            raw.lflag.ISIG = false;
-            raw.cc[@backingInt(std.posix.V.MIN)] = 0;
-            raw.cc[@backingInt(std.posix.V.TIME)] = 0;
-            try std.posix.tcsetattr(tty_file.handle, .FLUSH, raw);
+            raw.c_lflag &= ~@as(c.tcflag_t, c.ICANON | c.ECHO | c.ECHONL | c.ISIG);
+            raw.c_cc[c.VMIN] = 0;
+            raw.c_cc[c.VTIME] = 0;
+            try tcsetattr(tty_file.handle, raw);
 
             return .{
                 .file = tty_file,
@@ -194,7 +188,7 @@ pub const Vt = union(enum) {
         }
 
         pub fn deinit(self: *InputWatcher, io: std.Io) void {
-            std.posix.tcsetattr(self.file.handle, .FLUSH, self.original) catch {};
+            tcsetattr(self.file.handle, self.original) catch {};
             self.file.close(io);
         }
 
@@ -210,6 +204,33 @@ pub const Vt = union(enum) {
         }
     };
 };
+
+// https://codeberg.org/ziglang/zig/issues/37228
+fn tcgetattr(fd: std.posix.fd_t) std.posix.TermiosGetError!c.struct_termios {
+    var termios = std.mem.zeroes(c.struct_termios);
+    while (true) {
+        switch (std.posix.errno(c.tcgetattr(fd, &termios))) {
+            .SUCCESS => return termios,
+            .INTR => continue,
+            .BADF => unreachable,
+            .NOTTY => return error.NotATerminal,
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
+    }
+}
+
+fn tcsetattr(fd: std.posix.fd_t, termios: c.struct_termios) std.posix.TermiosSetError!void {
+    while (true) {
+        switch (std.posix.errno(c.tcsetattr(fd, c.TCSAFLUSH, &termios))) {
+            .SUCCESS => return,
+            .INTR => continue,
+            .BADF, .INVAL => unreachable,
+            .NOTTY => return error.NotATerminal,
+            .IO => return error.ProcessOrphaned,
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
+    }
+}
 
 fn getInheritedTtyDevicePath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     const inherited_fds = [_]std.posix.fd_t{
