@@ -31,8 +31,7 @@ pub fn main(init: std.process.Init) !void {
     defer res.deinit();
 
     if (res.args.help != 0) {
-        try clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
-        std.process.exit(0);
+        return clap.helpToFile(init.io, .stderr(), clap.Help, &params, .{});
     }
     if (res.args.version != 0) {
         var stderr_buf: [1024]u8 = undefined;
@@ -42,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
         try stderr.writeAll("zgsld " ++ build_options.version ++ "\n");
         try stderr.print("features: x11={s}\n", .{if (build_options.x11_support) "yes" else "no"});
         try stderr.flush();
-        std.process.exit(0);
+        return;
     }
 
     var conf_ini = zigini.Ini(Config).init(allocator);

@@ -140,14 +140,8 @@ pub fn writeEvent(_: *ipc.Codec, io_writer: *std.Io.Writer, event: *const Event)
             try writeHeader(io_writer, .pam_start_auth, user_len);
             try io_writer.writeAll(ev.user);
         },
-        .login_cancel => {
-            try writeHeader(io_writer, .login_cancel, 0);
-        },
-        .login_cancelled => {
-            try writeHeader(io_writer, .login_cancelled, 0);
-        },
-        .session_accepted => {
-            try writeHeader(io_writer, .session_accepted, 0);
+        .login_cancel, .login_cancelled, .session_accepted => {
+            try writeHeader(io_writer, std.meta.activeTag(event.*), 0);
         },
         .pam_message => |info| {
             const msg_len: u32 = @intCast(info.message.len);

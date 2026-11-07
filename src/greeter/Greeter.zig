@@ -8,7 +8,6 @@ const preview = @import("preview");
 const PreviewRuntime = @import("../preview/Runtime.zig");
 const ZgsldConnector = @import("ZgsldConnector.zig");
 
-const IpcConnection = ipc.Connection;
 const log = std.log.scoped(.zgsld);
 const Self = @This();
 
@@ -34,7 +33,7 @@ process: ProcessContext,
 /// Context passed to `VTable.run`.
 pub const RunContext = struct {
     /// IPC connection to the daemon.
-    ipc: *IpcConnection,
+    ipc: *ipc.Connection,
     gpa: std.mem.Allocator,
     io: std.Io,
     args: std.process.Args,
@@ -73,7 +72,7 @@ pub fn init(process: ProcessContext, opts: Options) Self {
 }
 
 pub const RunOptions = struct {
-    ipc_conn: ?*IpcConnection = null,
+    ipc_conn: ?*ipc.Connection = null,
 };
 
 pub fn run(self: Self, opts: RunOptions) !void {
@@ -88,7 +87,7 @@ pub fn run(self: Self, opts: RunOptions) !void {
     var connector = ZgsldConnector.init(self.process);
     defer connector.deinit();
     if (try connector.connect()) |transport| {
-        var connection = IpcConnection.init(transport, .{});
+        var connection = ipc.Connection.init(transport, .{});
         return self.vtable.run(self.greeterContext(&connection));
     }
 
@@ -172,7 +171,7 @@ fn runDaemon(self: Self) !void {
     });
 }
 
-fn greeterContext(self: Self, ipc_conn: *IpcConnection) RunContext {
+fn greeterContext(self: Self, ipc_conn: *ipc.Connection) RunContext {
     return .{
         .ipc = ipc_conn,
         .gpa = self.process.gpa,

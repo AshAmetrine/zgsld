@@ -49,5 +49,5 @@ pub fn connect(self: *ZgsldConnector) !?ipc.Transport {
 
 fn connectInterface(interface: *ipc.Connector) !ipc.Transport {
     const self: *ZgsldConnector = @fieldParentPtr("interface", interface);
-    return try self.connect() orelse return error.MissingZgsldSock;
+    return (try self.connect()) orelse error.MissingZgsldSock;
 }
