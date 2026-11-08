@@ -277,6 +277,13 @@ pub fn wait(self: *Shutdown, worker: *Worker) !std.process.Child.Term {
     return term;
 }
 
+pub fn waitChecked(self: *Shutdown, worker: *Worker) !void {
+    if (worker.process.id == null) return;
+    const term = try self.wait(worker);
+    if (worker.forced) return;
+    if (term != .exited or term.exited != 0) return error.WorkerError;
+}
+
 pub fn stop(self: *Shutdown, worker: *Worker) void {
     if (worker.pid == null) return;
     self.requestStop(worker, 0);
