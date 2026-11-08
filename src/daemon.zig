@@ -100,12 +100,12 @@ fn spawnWorkers(
     config: Config,
     shutdown: *Shutdown,
 ) !SpawnedWorkers {
-    const session_socks = try SocketPair.init();
+    const session_socks = try SocketPair.init(.{});
     errdefer session_socks.parent.close(process.io);
     const session_proc = try spawnWorker(process, exe_path, config, shutdown, .user, session_socks);
     errdefer shutdown.stop(session_proc);
 
-    const greeter_socks = try SocketPair.init();
+    const greeter_socks = try SocketPair.init(.{});
     errdefer greeter_socks.parent.close(process.io);
     const greeter_proc = try spawnWorker(process, exe_path, config, shutdown, .greeter, greeter_socks);
     return .{
@@ -125,7 +125,7 @@ fn spawnWorker(
     ipc_socks: ?SocketPair,
 ) !*Shutdown.Worker {
     defer if (ipc_socks) |socks| socks.child.close(process.io);
-    const control = try Shutdown.Connection.socketPair();
+    const control = try SocketPair.init(.{ .mode = .seqpacket });
     defer control.child.close(process.io);
     errdefer control.parent.close(process.io);
     var proc = try worker.process.spawn(.{

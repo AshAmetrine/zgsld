@@ -31,7 +31,7 @@ const Endpoint = struct {
 };
 
 pub fn init(self: *Self, io: std.Io, codecs: ?preview.Codecs, opts: preview.Options) !void {
-    const fds = try SocketPair.init();
+    const fds = try SocketPair.init(.{});
     errdefer fds.parent.close(io);
     errdefer fds.child.close(io);
 

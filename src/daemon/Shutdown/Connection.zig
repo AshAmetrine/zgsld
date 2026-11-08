@@ -11,17 +11,6 @@ pub const Message = enum(u8) { register, exited, stop, accepted, stopping };
 pub const Packet = struct { message: Message, role: Role, pid: std.posix.pid_t = 0 };
 const packet_size = 2 + @sizeOf(std.posix.pid_t);
 
-pub fn socketPair() !SocketPair {
-    var fds: [2]std.posix.fd_t = undefined;
-    const socket_type = std.posix.SOCK.SEQPACKET | std.posix.SOCK.CLOEXEC;
-    const rc = std.c.socketpair(std.posix.AF.UNIX, socket_type, 0, &fds);
-    if (rc != 0) return std.posix.unexpectedErrno(std.c.errno(rc));
-    return .{
-        .parent = .{ .handle = fds[0], .flags = .{ .nonblocking = false } },
-        .child = .{ .handle = fds[1], .flags = .{ .nonblocking = false } },
-    };
-}
-
 pub fn init(io: std.Io, file: std.Io.File) !Connection {
     try fd_utils.setCloseOnExec(file.handle);
     return .{ .io = io, .file = file };
@@ -76,7 +65,7 @@ pub fn receive(fd: std.posix.fd_t, nonblocking: bool) !?Packet {
 // Hold the child before exec until the manager knows its PID. If the worker
 // exits before registration, closing the gate makes the child exit as well.
 pub fn fork(self: *Connection, role: Role) !std.posix.pid_t {
-    const gate = try SocketPair.init();
+    const gate = try SocketPair.init(.{});
     const pid = std.c.fork();
     if (pid < 0) {
         const err = std.posix.unexpectedErrno(std.c.errno(pid));
