@@ -20,8 +20,32 @@ pub const SpawnOpts = struct {
 };
 
 pub fn spawn(opts: SpawnOpts) !std.process.Child {
-    var worker_envmap = std.process.Environ.Map.init(opts.allocator);
+    var worker_envmap = try createWorkerEnv(opts);
     defer worker_envmap.deinit();
+
+    const service_name = switch (opts.session_class) {
+        .greeter => opts.config.greeter.service_name orelse opts.config.session.service_name,
+        .user, .autologin => opts.config.session.service_name,
+    };
+
+    const argv = [_][]const u8{
+        opts.worker_path,
+        "--session-worker",
+        @tagName(opts.session_class),
+        service_name,
+        opts.config.greeter.user,
+    };
+
+    return std.process.spawn(opts.io, .{
+        .argv = if (opts.session_class == .greeter) &argv else argv[0..4],
+        .environ_map = &worker_envmap,
+        .inherit_files = if (opts.ipc_file) |file| &.{ file, opts.control_file } else &.{opts.control_file},
+    });
+}
+
+fn createWorkerEnv(opts: SpawnOpts) !std.process.Environ.Map {
+    var worker_envmap = std.process.Environ.Map.init(opts.allocator);
+    errdefer worker_envmap.deinit();
 
     for ([_][]const u8{ "PATH", "TERM" }) |key| {
         if (opts.env_map.get(key)) |value| {
@@ -59,11 +83,6 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
         }
     }
 
-    const service_name = switch (opts.session_class) {
-        .greeter => opts.config.greeter.service_name orelse opts.config.session.service_name,
-        .user, .autologin => opts.config.session.service_name,
-    };
-
     if (opts.session_class != .autologin) {
         const ipc_file = opts.ipc_file orelse return error.MissingIpcFd;
         var fd_buf: [16]u8 = undefined;
@@ -99,19 +118,7 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
         .user => {},
     }
 
-    const argv = [_][]const u8{
-        opts.worker_path,
-        "--session-worker",
-        @tagName(opts.session_class),
-        service_name,
-        opts.config.greeter.user,
-    };
-
-    return std.process.spawn(opts.io, .{
-        .argv = if (opts.session_class == .greeter) &argv else argv[0..4],
-        .environ_map = &worker_envmap,
-        .inherit_files = if (opts.ipc_file) |file| &.{ file, opts.control_file } else &.{opts.control_file},
-    });
+    return worker_envmap;
 }
 
 fn putZgsldVtEnv(envmap: *std.process.Environ.Map, vt: Config.Vt) !void {
