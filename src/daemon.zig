@@ -294,9 +294,13 @@ fn forwardIpc(
     defer worker_file.close(io);
 
     var greeter_rbuf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &greeter_rbuf);
     var greeter_wbuf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &greeter_wbuf);
     var worker_rbuf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &worker_rbuf);
     var worker_wbuf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &worker_wbuf);
     var greeter_reader = greeter_file.reader(io, &greeter_rbuf);
     var greeter_writer = greeter_file.writer(io, &greeter_wbuf);
     var worker_reader = worker_file.reader(io, &worker_rbuf);
@@ -334,6 +338,12 @@ fn forwardIpc(
 
         var event_buf: [ipc.event_buf_size]u8 = undefined;
         while (true) {
+            defer std.crypto.secureZero(u8, &event_buf);
+            defer std.crypto.secureZero(u8, &worker_wbuf);
+            defer {
+                std.crypto.secureZero(u8, greeter_rbuf[0..greeter_reader.interface.seek]);
+                std.crypto.secureZero(u8, greeter_rbuf[greeter_reader.interface.end..]);
+            }
             const read_result = blk: {
                 defer replies.unlock();
                 break :blk ipc_codec.readEvent(&greeter_reader.interface, &replies.writer, &event_buf);
@@ -391,6 +401,7 @@ fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
 fn forwardIpcEvents(ctx: *ForwardIpcCtx) !void {
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     while (true) {
+        defer std.crypto.secureZero(u8, &event_buf);
         const event = ctx.src.readEvent(&event_buf) catch |err| switch (err) {
             error.EndOfStream => return,
             else => return err,

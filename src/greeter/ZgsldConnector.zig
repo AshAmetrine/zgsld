@@ -22,6 +22,8 @@ pub fn init(process: ProcessContext) ZgsldConnector {
 pub fn deinit(self: *ZgsldConnector) void {
     if (self.file) |file| file.close(self.process.io);
     self.file = null;
+    std.crypto.secureZero(u8, &self.read_buf);
+    std.crypto.secureZero(u8, &self.write_buf);
 }
 
 pub fn connect(self: *ZgsldConnector) !?ipc.Transport {

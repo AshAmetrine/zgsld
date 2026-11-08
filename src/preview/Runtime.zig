@@ -53,6 +53,10 @@ pub fn closeAndJoin(self: *Self) !void {
 
     self.shutdownSockets();
     thread.join();
+    std.crypto.secureZero(u8, &self.client.read_buf);
+    std.crypto.secureZero(u8, &self.client.write_buf);
+    std.crypto.secureZero(u8, &self.server.read_buf);
+    std.crypto.secureZero(u8, &self.server.write_buf);
     self.client.file.close(self.io);
     self.server.file.close(self.io);
     return self.result;

@@ -158,9 +158,12 @@ pub fn writeEvent(_: *ipc.Codec, io_writer: *std.Io.Writer, event: *const Event)
             try io_writer.writeAll(req.message);
         },
         .pam_response => |resp| {
+            // Flush secrets so unused writer storage can be erased immediately.
+            defer std.crypto.secureZero(u8, io_writer.buffer[io_writer.end..]);
             const resp_len: u32 = @intCast(resp.len);
             try writeHeader(io_writer, .pam_response, resp_len);
             try io_writer.writeAll(resp);
+            try io_writer.flush();
         },
         .pam_auth_result => |result| {
             try writeHeader(io_writer, .pam_auth_result, 1);

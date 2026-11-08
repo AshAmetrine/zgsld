@@ -39,8 +39,11 @@ pub fn run(opts: RunOpts) !void {
     defer if (!ipc_closed) opts.ipc_socket.close(opts.io);
 
     var event_buf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &event_buf);
     var rbuf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &rbuf);
     var wbuf: [ipc.event_buf_size]u8 = undefined;
+    defer std.crypto.secureZero(u8, &wbuf);
     var reader_impl = opts.ipc_socket.reader(opts.io, &rbuf);
     var writer_impl = opts.ipc_socket.writer(opts.io, &wbuf);
     var connection = ipc.Connection.init(.{
@@ -52,6 +55,7 @@ pub fn run(opts: RunOpts) !void {
     var cancelled = false;
 
     while (true) {
+        defer std.crypto.secureZero(u8, &event_buf);
         // Confirm cleanup has finished after login_cancel.
         if (cancelled) {
             try ipc_conn.writeEvent(&.login_cancelled);

@@ -118,6 +118,7 @@ const StepState = struct {
     }
 
     fn setPreviousResponse(self: *StepState, resp: []const u8) void {
+        std.crypto.secureZero(u8, &self.previous_response_buf);
         @memcpy(self.previous_response_buf[0..resp.len], resp);
         self.previous_response_len = resp.len;
     }
@@ -135,6 +136,7 @@ pub fn run(_: std.Io, connection: *ipc.Connection, options: Options) !void {
     var authenticated = false;
 
     while (true) {
+        defer std.crypto.secureZero(u8, &event_buf);
         const read_result = ctx.conn.readEvent(&event_buf);
         const event = read_result catch |err| switch (err) {
             error.EndOfStream => return,
@@ -182,6 +184,7 @@ fn runAuthSequence(
         true;
 
     var step_state = StepState{};
+    defer std.crypto.secureZero(u8, &step_state.previous_response_buf);
     const auth_state = try runSteps(
         ctx,
         ctx.opts.authenticate_steps,
@@ -226,6 +229,7 @@ fn runSteps(
                 try sendEvent(ctx, &.{ .pam_message = info });
             },
             .pam_challenge => |challenge| {
+                defer std.crypto.secureZero(u8, event_buf);
                 try sendEvent(ctx, &.{ .pam_request = challenge.request });
 
                 const response = try ctx.conn.readEvent(event_buf);
@@ -259,6 +263,7 @@ fn runSteps(
 
                 for (0..retry.attempts) |attempt| {
                     var attempt_state = step_state.*;
+                    defer std.crypto.secureZero(u8, &attempt_state.previous_response_buf);
                     const retry_result = try runSteps(
                         ctx,
                         retry.steps,

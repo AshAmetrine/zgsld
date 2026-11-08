@@ -31,6 +31,13 @@ fn runConversation(msgs: PamMessages, ctx: *PamCtx) !void {
     while (try iter.next()) |msg| {
         switch (msg) {
             .prompt_echo_off, .prompt_echo_on => |m| {
+                defer std.crypto.secureZero(u8, &ipc_buf);
+                defer {
+                    // Keep unread events while erasing consumed binary IPC data.
+                    const reader = ctx.ipc_conn.transport.reader;
+                    std.crypto.secureZero(u8, reader.buffer[0..reader.seek]);
+                    std.crypto.secureZero(u8, reader.buffer[reader.end..]);
+                }
                 try ctx.ipc_conn.writeEvent(&.{
                     .pam_request = .{
                         .echo = msg == .prompt_echo_on,
