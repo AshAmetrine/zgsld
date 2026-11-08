@@ -1,5 +1,5 @@
 const std = @import("std");
-const utils = @import("../user.zig");
+const builtin = @import("builtin");
 
 const Family = enum(u16) {
     FamilyLocal = 256,
@@ -76,7 +76,7 @@ fn resolveXauthDir(
         const runtime_dir = std.mem.trimEnd(u8, runtime_dir_raw, "/");
         if (runtime_dir.len != 0 and std.fs.path.isAbsolute(runtime_dir)) {
             if (std.Io.Dir.openDirAbsolute(io, runtime_dir, .{ .follow_symlinks = false })) |dir| {
-                const metadata = utils.getDirMetadata(dir) catch {
+                const metadata = getDirMetadata(dir) catch {
                     dir.close(io);
                     return error.UnsafePathOwnership;
                 };
@@ -95,12 +95,12 @@ fn resolveXauthDir(
     var tmp_dir = try std.Io.Dir.openDirAbsolute(io, "/tmp", .{ .follow_symlinks = false });
     defer tmp_dir.close(io);
 
-    var base = try utils.ensureOwnedDirAt(tmp_dir, io, "zgsld", @fromBackingInt(@intCast(0o755)), 0, 0);
+    var base = try ensureOwnedDirAt(tmp_dir, io, "zgsld", @fromBackingInt(@intCast(0o755)), 0, 0);
     defer base.close(io);
 
     var user_dir_name_buf: [32]u8 = undefined;
     const user_dir_name = try std.fmt.bufPrint(&user_dir_name_buf, "{d}", .{uid});
-    var user_dir = try utils.ensureOwnedDirAt(base, io, user_dir_name, @fromBackingInt(@intCast(0o700)), uid, gid);
+    var user_dir = try ensureOwnedDirAt(base, io, user_dir_name, @fromBackingInt(@intCast(0o700)), uid, gid);
     errdefer user_dir.close(io);
 
     const user_dir_path = try std.fmt.bufPrint(user_dir_buf, "{s}/{s}", .{ base_dir, user_dir_name });
@@ -155,4 +155,69 @@ fn createUniqueXauthFile(
     }
 
     return error.PathAlreadyExists;
+}
+
+fn ensureOwnedDirAt(
+    parent: std.Io.Dir,
+    io: std.Io,
+    name: []const u8,
+    permissions: std.Io.Dir.Permissions,
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+) !std.Io.Dir {
+    const created = blk: {
+        parent.createDir(io, name, permissions) catch |err| switch (err) {
+            error.PathAlreadyExists => break :blk false,
+            else => return err,
+        };
+        break :blk true;
+    };
+
+    var dir = try parent.openDir(io, name, .{ .follow_symlinks = false, .iterate = true });
+    errdefer dir.close(io);
+
+    if (created) {
+        try dir.setOwner(io, uid, gid);
+    } else {
+        const owner = try getDirMetadata(dir);
+        if (owner.uid != uid or owner.gid != gid) {
+            return error.UnsafePathOwnership;
+        }
+    }
+    try dir.setPermissions(io, permissions);
+    return dir;
+}
+
+fn getDirMetadata(dir: std.Io.Dir) !struct {
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+    mode: std.posix.mode_t,
+} {
+    switch (comptime builtin.os.tag) {
+        .linux => {
+            const linux = std.os.linux;
+            var statx = std.mem.zeroes(linux.Statx);
+            switch (linux.errno(linux.statx(
+                dir.handle,
+                "",
+                linux.AT.EMPTY_PATH,
+                .{ .UID = true, .GID = true, .MODE = true },
+                &statx,
+            ))) {
+                .SUCCESS => {
+                    if (!statx.mask.UID or !statx.mask.GID or !statx.mask.MODE) return error.Unexpected;
+                    return .{ .uid = statx.uid, .gid = statx.gid, .mode = statx.mode };
+                },
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
+        },
+        else => {
+            var stat: std.c.Stat = undefined;
+            const rc = std.c.fstat(dir.handle, &stat);
+            switch (std.c.errno(rc)) {
+                .SUCCESS => return .{ .uid = stat.uid, .gid = stat.gid, .mode = stat.mode },
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
+        },
+    }
 }
