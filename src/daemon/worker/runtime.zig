@@ -1,6 +1,7 @@
 const std = @import("std");
 const ipc = @import("ipc");
 const build_options = @import("build_options");
+const Runtime = @import("runtime/Runtime.zig");
 const session = @import("runtime/session.zig");
 const fd_utils = @import("common").fd;
 const autologin = @import("runtime/autologin.zig");
@@ -58,6 +59,15 @@ pub fn run(
     const vt = try Vt.parse(environ_map.get("ZGSLD_VT"));
     const x11 = try parseX11Options(environ_map);
 
+    const runtime: Runtime = .{
+        .allocator = gpa,
+        .io = io,
+        .shutdown_conn = &shutdown_conn,
+        .env_map = environ_map,
+        .vt = vt,
+        .x11 = x11,
+    };
+
     switch (opts.session_class) {
         .greeter => {
             const sock_fd = try parseZgsldSock(environ_map);
@@ -70,36 +80,24 @@ pub fn run(
                 greeter_session_type_raw,
             ) orelse return error.InvalidGreeterSessionType;
 
-            try greeter.run(.{
-                .allocator = gpa,
-                .io = io,
-                .shutdown_conn = &shutdown_conn,
-                .env_map = environ_map,
+            try greeter.run(&runtime, .{
                 .service_name = opts.service_name,
                 .username = opts.greeter_username.?,
                 .ipc_fd = sock_fd,
                 .command = greeter_cmd,
                 .session_type = greeter_session_type,
-                .vt = vt,
-                .x11 = x11,
             });
         },
         .user => {
             const sock_fd = try parseZgsldSock(environ_map);
             try fd_utils.setCloseOnExec(sock_fd);
 
-            try login.run(.{
-                .allocator = gpa,
-                .io = io,
-                .shutdown_conn = &shutdown_conn,
-                .env_map = environ_map,
+            try login.run(&runtime, .{
                 .service_name = opts.service_name,
                 .ipc_socket = .{
                     .handle = sock_fd,
                     .flags = .{ .nonblocking = false },
                 },
-                .vt = vt,
-                .x11 = x11,
             });
         },
         .autologin => {
@@ -117,11 +115,7 @@ pub fn run(
             const autologin_user_z = try gpa.dupeSentinel(u8, autologin_user, 0);
             defer gpa.free(autologin_user_z);
 
-            try autologin.run(.{
-                .allocator = gpa,
-                .io = io,
-                .shutdown_conn = &shutdown_conn,
-                .env_map = environ_map,
+            try autologin.run(&runtime, .{
                 .service_name = opts.service_name,
                 .user = autologin_user_z,
                 .info = .{
@@ -131,8 +125,6 @@ pub fn run(
                         .source_profile = true,
                     },
                 },
-                .vt = vt,
-                .x11 = x11,
             });
         },
     }

@@ -5,8 +5,7 @@ const PamError = @import("pam").PamError;
 const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
-const Vt = @import("vt").Vt;
-const Shutdown = @import("../../Shutdown.zig");
+const Runtime = @import("Runtime.zig");
 
 const PamCtx = pam_conv.PamCtx;
 
@@ -20,14 +19,8 @@ const SessionEnvKey = enum {
 };
 
 pub const RunOpts = struct {
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    shutdown_conn: *Shutdown.Connection,
-    env_map: *const std.process.Environ.Map,
     service_name: [:0]const u8,
     ipc_socket: std.Io.File,
-    vt: Vt,
-    x11: session_mod.X11Options,
 };
 
 const SessionSetup = struct {
@@ -35,9 +28,9 @@ const SessionSetup = struct {
     info: ipc.SessionInfo,
 };
 
-pub fn run(opts: RunOpts) !void {
+pub fn run(runtime: *const Runtime, opts: RunOpts) !void {
     var ipc_closed = false;
-    defer if (!ipc_closed) opts.ipc_socket.close(opts.io);
+    defer if (!ipc_closed) opts.ipc_socket.close(runtime.io);
 
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     defer std.crypto.secureZero(u8, &event_buf);
@@ -45,8 +38,8 @@ pub fn run(opts: RunOpts) !void {
     defer std.crypto.secureZero(u8, &rbuf);
     var wbuf: [ipc.event_buf_size]u8 = undefined;
     defer std.crypto.secureZero(u8, &wbuf);
-    var reader_impl = opts.ipc_socket.reader(opts.io, &rbuf);
-    var writer_impl = opts.ipc_socket.writer(opts.io, &wbuf);
+    var reader_impl = opts.ipc_socket.reader(runtime.io, &rbuf);
+    var writer_impl = opts.ipc_socket.writer(runtime.io, &wbuf);
     var connection = ipc.Connection.init(.{
         .reader = &reader_impl.interface,
         .writer = &writer_impl.interface,
@@ -83,7 +76,7 @@ pub fn run(opts: RunOpts) !void {
                     .conv = pam_conv.loginConv,
                     .ctx = &pam_ctx,
                 };
-                var pam = initPam(opts, auth.user, &conv_state) catch |err| {
+                var pam = initPam(runtime, opts.service_name, auth.user, &conv_state) catch |err| {
                     _ = try reportAuthError(&pam_ctx, .setup, err);
                     continue;
                 };
@@ -98,7 +91,14 @@ pub fn run(opts: RunOpts) !void {
                 };
                 try writeAuthResult(&pam_ctx, true);
 
-                switch (try runSession(opts, ipc_conn, &pam, &event_buf, &ipc_closed)) {
+                switch (try runSession(
+                    runtime,
+                    opts.ipc_socket,
+                    ipc_conn,
+                    &pam,
+                    &event_buf,
+                    &ipc_closed,
+                )) {
                     .cancelled => cancelled = true,
                     .finished => return,
                 }
@@ -109,19 +109,20 @@ pub fn run(opts: RunOpts) !void {
 }
 
 fn initPam(
-    opts: RunOpts,
+    runtime: *const Runtime,
+    service_name: [:0]const u8,
     user: [:0]const u8,
     state: *const Pam(PamCtx).ConvState,
 ) !Pam(PamCtx) {
-    var pam = try Pam(PamCtx).init(opts.allocator, .{
-        .service_name = opts.service_name,
+    var pam = try Pam(PamCtx).init(runtime.allocator, .{
+        .service_name = service_name,
         .user = user,
         .state = state,
     });
     errdefer pam.deinit();
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tty_path = try opts.vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
+    const tty_path = try runtime.vt.resolveTtyDevicePath(runtime.io, &tty_path_buf);
     try pam.setItem(.tty, tty_path);
     return pam;
 }
@@ -159,7 +160,8 @@ fn reportAuthError(ctx: *PamCtx, phase: AuthPhase, err: anyerror) !AuthFailure {
 const SessionResult = enum { cancelled, finished };
 
 fn runSession(
-    opts: RunOpts,
+    runtime: *const Runtime,
+    ipc_socket: std.Io.File,
     ipc_conn: *ipc.Connection,
     pam: *Pam(PamCtx),
     event_buf: *[ipc.event_buf_size]u8,
@@ -167,7 +169,7 @@ fn runSession(
 ) !SessionResult {
     var session = blk: {
         var session_setup = (getSession(
-            opts.allocator,
+            runtime.allocator,
             ipc_conn,
             event_buf,
         ) catch |err| {
@@ -178,19 +180,11 @@ fn runSession(
         };
         defer session_setup.env.deinit();
         if (signals.shutdownRequested()) return .finished;
-        opts.ipc_socket.close(opts.io);
+        ipc_socket.close(runtime.io);
         ipc_closed.* = true;
-        break :blk try startSession(opts.allocator, pam, .{
-            .io = opts.io,
-            .shutdown_conn = opts.shutdown_conn,
-            .env_map = opts.env_map,
-            .info = session_setup.info,
-            .session_envmap = &session_setup.env,
-            .vt = opts.vt,
-            .x11 = opts.x11,
-        });
+        break :blk try startSession(runtime, pam, session_setup.info, &session_setup.env);
     };
-    defer session.deinit(opts.io);
+    defer session.deinit(runtime.io);
 
     log.debug("Waiting for session to end...", .{});
     try session.wait();
@@ -258,37 +252,24 @@ fn getSession(
     }
 }
 
-const StartSessionOptions = struct {
-    io: std.Io,
-    shutdown_conn: *Shutdown.Connection,
-    env_map: *const std.process.Environ.Map,
+fn startSession(
+    runtime: *const Runtime,
+    pam: *Pam(PamCtx),
     info: ipc.SessionInfo,
     session_envmap: *std.process.Environ.Map,
-    vt: Vt,
-    x11: session_mod.X11Options,
-};
-
-fn startSession(
-    allocator: std.mem.Allocator,
-    pam: *Pam(PamCtx),
-    opts: StartSessionOptions,
 ) !session_mod.Session {
     log.debug("Starting session...", .{});
-    const session_vt = session_mod.resolveSessionVt(opts.info.session_type, opts.x11, opts.vt);
+    const session_vt = runtime.resolveSessionVt(info.session_type);
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
+    const tty_path = try session_vt.resolveTtyDevicePath(runtime.io, &tty_path_buf);
     try pam.setItem(.tty, tty_path);
-    const tty_file = try session_vt.openSessionTty(opts.io);
-    errdefer if (tty_file.handle > 2) tty_file.close(opts.io);
+    const tty_file = try session_vt.openSessionTty(runtime.io);
+    errdefer if (tty_file.handle > 2) tty_file.close(runtime.io);
 
-    return try session_mod.start(PamCtx, allocator, pam, .{
-        .io = opts.io,
-        .shutdown_conn = opts.shutdown_conn,
-        .host_env_map = opts.env_map,
-        .info = opts.info,
-        .session_envmap = opts.session_envmap,
+    return try runtime.startSession(PamCtx, pam, .{
+        .info = info,
+        .env_map = session_envmap,
         .vt = session_vt,
         .tty_file = tty_file,
-        .x11 = opts.x11,
     });
 }
