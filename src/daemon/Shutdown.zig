@@ -35,7 +35,7 @@ pub const Worker = struct {
     ipc: ?std.posix.fd_t = null,
     connected: bool = false,
     generation: usize = 0,
-    pids: [2]?std.posix.pid_t = .{ null, null },
+    pids: std.EnumArray(Connection.Role, ?std.posix.pid_t) = .initFill(null),
     phase: Phase = .running,
     deadline: ?std.Io.Timestamp = null,
     forced: bool = false,
@@ -46,11 +46,11 @@ pub const Worker = struct {
     }
 
     fn signal(self: *Worker, role: Connection.Role, sig: std.posix.SIG) void {
-        if (self.pids[@backingInt(role)]) |pid| std.posix.kill(pid, sig) catch {};
+        if (self.pids.get(role)) |pid| std.posix.kill(pid, sig) catch {};
     }
 
     fn stopChild(self: *Worker, control: *Shutdown, role: Connection.Role) void {
-        if (self.pids[@backingInt(role)] != null) {
+        if (self.pids.get(role) != null) {
             self.signal(role, .TERM);
             self.arm(control, .{ .term = role }, term_seconds);
             return;
@@ -63,7 +63,7 @@ pub const Worker = struct {
 
     fn beginStop(self: *Worker, control: *Shutdown, grace_seconds: c_uint) void {
         if (self.phase != .running) return;
-        if (grace_seconds != 0 and self.pids[0] != null) {
+        if (grace_seconds != 0 and self.pids.get(.session) != null) {
             self.arm(control, .grace, grace_seconds);
             return;
         }
@@ -77,7 +77,7 @@ pub const Worker = struct {
     }
 
     fn exited(self: *Worker, control: *Shutdown, role: Connection.Role) void {
-        self.pids[@backingInt(role)] = null;
+        self.pids.set(role, null);
         switch (self.phase) {
             .running => self.beginStop(control, 0),
             .grace => if (role == .session) {
@@ -92,7 +92,7 @@ pub const Worker = struct {
     fn killChildren(self: *Worker) void {
         self.signal(.session, .KILL);
         self.signal(.x11, .KILL);
-        self.pids = .{ null, null };
+        self.pids = .initFill(null);
     }
 
     fn expire(self: *Worker, control: *Shutdown) void {
@@ -126,11 +126,10 @@ pub const Worker = struct {
     }
 
     fn receive(self: *Worker, control: *Shutdown, packet: Connection.Packet) !void {
-        const index = @backingInt(packet.role);
         switch (packet.message) {
             .register => {
-                if (self.pids[index] != null) return error.DuplicateProcess;
-                self.pids[index] = packet.pid;
+                if (self.pids.get(packet.role) != null) return error.DuplicateProcess;
+                self.pids.set(packet.role, packet.pid);
                 const stopping = self.phase != .running;
                 try Connection.send(self.socket, .{
                     .message = if (stopping) .stopping else .accepted,
@@ -139,7 +138,7 @@ pub const Worker = struct {
                 if (stopping) self.signal(packet.role, .KILL);
             },
             .exited => {
-                if (self.pids[index] == null) return error.InvalidControlMessage;
+                if (self.pids.get(packet.role) == null) return error.InvalidControlMessage;
                 self.exited(control, packet.role);
             },
             .stop => self.beginStop(control, 0),
