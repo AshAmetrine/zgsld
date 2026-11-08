@@ -25,32 +25,36 @@ pub fn resolveSessionVt(session_type: ipc.SessionType, x11: X11Options, fallback
     return fallback;
 }
 
-/// Takes ownership of tty_file on success.
-pub fn start(
-    comptime T: type,
-    allocator: std.mem.Allocator,
+pub const StartOptions = struct {
     io: std.Io,
     shutdown_conn: *Shutdown.Connection,
     host_env_map: *const std.process.Environ.Map,
     info: ipc.SessionInfo,
-    pam: *Pam(T),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
     tty_file: std.Io.File,
     x11: X11Options,
+};
+
+/// Takes ownership of opts.tty_file on success.
+pub fn start(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    pam: *Pam(T),
+    opts: StartOptions,
 ) !Session {
-    try env_mod.applyPamUserSessionEnv(T, pam, session_envmap, io, host_env_map, vt);
-    try env_mod.applyTermEnv(session_envmap, host_env_map);
-    const user_info = try env_mod.applyUserEnv(T, pam, session_envmap);
+    try env_mod.applyPamUserSessionEnv(T, pam, opts.session_envmap, opts.io, opts.host_env_map, opts.vt);
+    try env_mod.applyTermEnv(opts.session_envmap, opts.host_env_map);
+    const user_info = try env_mod.applyUserEnv(T, pam, opts.session_envmap);
     return Session.spawn(allocator, .{
-        .io = io,
-        .shutdown_conn = shutdown_conn,
-        .x11 = x11,
-        .session_info = info,
-        .envmap = session_envmap,
+        .io = opts.io,
+        .shutdown_conn = opts.shutdown_conn,
+        .x11 = opts.x11,
+        .session_info = opts.info,
+        .envmap = opts.session_envmap,
         .user_info = user_info,
-        .vt = vt,
-        .tty_file = tty_file,
+        .vt = opts.vt,
+        .tty_file = opts.tty_file,
     });
 }
 

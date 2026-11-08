@@ -180,17 +180,15 @@ fn runSession(
         if (signals.shutdownRequested()) return .finished;
         opts.ipc_socket.close(opts.io);
         ipc_closed.* = true;
-        break :blk try startSession(
-            opts.allocator,
-            opts.io,
-            opts.shutdown_conn,
-            opts.env_map,
-            session_setup.info,
-            pam,
-            &session_setup.env,
-            opts.vt,
-            opts.x11,
-        );
+        break :blk try startSession(opts.allocator, pam, .{
+            .io = opts.io,
+            .shutdown_conn = opts.shutdown_conn,
+            .env_map = opts.env_map,
+            .info = session_setup.info,
+            .session_envmap = &session_setup.env,
+            .vt = opts.vt,
+            .x11 = opts.x11,
+        });
     };
     defer session.deinit(opts.io);
 
@@ -260,36 +258,37 @@ fn getSession(
     }
 }
 
-fn startSession(
-    allocator: std.mem.Allocator,
+const StartSessionOptions = struct {
     io: std.Io,
     shutdown_conn: *Shutdown.Connection,
     env_map: *const std.process.Environ.Map,
     info: ipc.SessionInfo,
-    pam: *Pam(PamCtx),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
     x11: session_mod.X11Options,
+};
+
+fn startSession(
+    allocator: std.mem.Allocator,
+    pam: *Pam(PamCtx),
+    opts: StartSessionOptions,
 ) !session_mod.Session {
     log.debug("Starting session...", .{});
-    const session_vt = session_mod.resolveSessionVt(info.session_type, x11, vt);
+    const session_vt = session_mod.resolveSessionVt(opts.info.session_type, opts.x11, opts.vt);
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tty_path = try session_vt.resolveTtyDevicePath(io, &tty_path_buf);
+    const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
     try pam.setItem(.tty, tty_path);
-    const tty_file = try session_vt.openSessionTty(io);
-    errdefer if (tty_file.handle > 2) tty_file.close(io);
+    const tty_file = try session_vt.openSessionTty(opts.io);
+    errdefer if (tty_file.handle > 2) tty_file.close(opts.io);
 
-    return try session_mod.start(
-        PamCtx,
-        allocator,
-        io,
-        shutdown_conn,
-        env_map,
-        info,
-        pam,
-        session_envmap,
-        session_vt,
-        tty_file,
-        x11,
-    );
+    return try session_mod.start(PamCtx, allocator, pam, .{
+        .io = opts.io,
+        .shutdown_conn = opts.shutdown_conn,
+        .host_env_map = opts.env_map,
+        .info = opts.info,
+        .session_envmap = opts.session_envmap,
+        .vt = session_vt,
+        .tty_file = tty_file,
+        .x11 = opts.x11,
+    });
 }

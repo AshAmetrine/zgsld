@@ -42,19 +42,16 @@ pub fn run(opts: RunOpts) !void {
         if (opts.info.session_type == .x11) {
             try session_envmap.put("XDG_SESSION_TYPE", "x11");
         }
-        break :blk try session_mod.start(
-            void,
-            opts.allocator,
-            opts.io,
-            opts.shutdown_conn,
-            opts.env_map,
-            opts.info,
-            &pam,
-            &session_envmap,
-            session_vt,
-            tty_file,
-            opts.x11,
-        );
+        break :blk try session_mod.start(void, opts.allocator, &pam, .{
+            .io = opts.io,
+            .shutdown_conn = opts.shutdown_conn,
+            .host_env_map = opts.env_map,
+            .info = opts.info,
+            .session_envmap = &session_envmap,
+            .vt = session_vt,
+            .tty_file = tty_file,
+            .x11 = opts.x11,
+        });
     };
     defer session.deinit(opts.io);
 
