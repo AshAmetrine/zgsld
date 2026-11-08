@@ -146,7 +146,7 @@ pub const Session = struct {
 
         const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr };
 
-        try opts.vt.activate(opts.io);
+        // The session VT is already active. Reactivation would reset Xorg's VT mode.
         const tty_file = try opts.vt.openDevice(opts.io, opts.env_map, .read_write);
         defer tty_file.close(opts.io);
         const groups = try utils.getGroups(allocator, opts.user_info);
