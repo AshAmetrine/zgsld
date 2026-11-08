@@ -7,7 +7,7 @@ const build_options = @import("build_options");
 const ipc = @import("ipc");
 pub const Vt = @import("vt").Vt;
 
-const X11Config = struct {
+pub const X11Config = struct {
     /// X server command, optionally with args.
     command: []const u8 = build_options.x11_cmd,
 

@@ -14,6 +14,7 @@ pub const RunOpts = struct {
     user: [:0]const u8,
     info: ipc.SessionInfo,
     vt: Vt,
+    x11: session_mod.X11Options,
 };
 
 pub fn run(opts: RunOpts) !void {
@@ -24,7 +25,7 @@ pub fn run(opts: RunOpts) !void {
     });
     defer pam.deinit();
 
-    const session_vt = try session_mod.resolveSessionVt(opts.info.session_type, opts.env_map, opts.vt);
+    const session_vt = session_mod.resolveSessionVt(opts.info.session_type, opts.x11, opts.vt);
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
@@ -52,6 +53,7 @@ pub fn run(opts: RunOpts) !void {
             &session_envmap,
             session_vt,
             tty_file,
+            opts.x11,
         );
     };
     defer session.deinit(opts.io);

@@ -19,6 +19,7 @@ pub const RunOpts = struct {
     command: []const u8,
     session_type: ipc.SessionType,
     vt: Vt,
+    x11: session_mod.X11Options,
 };
 
 pub fn run(opts: RunOpts) !void {
@@ -32,7 +33,7 @@ pub fn run(opts: RunOpts) !void {
     var session = blk: {
         defer _ = std.c.close(opts.ipc_fd);
 
-        const session_vt = try session_mod.resolveSessionVt(opts.session_type, opts.env_map, opts.vt);
+        const session_vt = session_mod.resolveSessionVt(opts.session_type, opts.x11, opts.vt);
         var tty_file = try session_vt.openSessionTty(opts.io);
         errdefer if (tty_file.handle > 2) tty_file.close(opts.io);
 
@@ -62,7 +63,7 @@ pub fn run(opts: RunOpts) !void {
         break :blk try Session.spawn(opts.allocator, .{
             .io = opts.io,
             .shutdown_conn = opts.shutdown_conn,
-            .host_env_map = opts.env_map,
+            .x11 = opts.x11,
             .session_info = session_info,
             .envmap = &envmap,
             .user_info = user_info,

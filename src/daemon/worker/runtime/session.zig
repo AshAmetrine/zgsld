@@ -3,6 +3,7 @@ const ipc = @import("ipc");
 const tty = @import("tty.zig");
 const env_mod = @import("env.zig");
 const build_options = @import("build_options");
+const Config = @import("common").Config;
 const XServer = if (build_options.x11_support) @import("session/XServer.zig");
 const utils = @import("user.zig");
 const Pam = @import("pam").Pam;
@@ -10,22 +11,16 @@ const UserInfo = utils.UserInfo;
 const Vt = @import("vt").Vt;
 const Shutdown = @import("../../Shutdown.zig");
 
+pub const X11Options = if (build_options.x11_support) Config.X11Config else void;
+
 const StderrMode = enum {
     inherit,
     tty,
 };
 
-pub fn resolveSessionVt(
-    session_type: ipc.SessionType,
-    host_env_map: *const std.process.Environ.Map,
-    fallback: Vt,
-) !Vt {
+pub fn resolveSessionVt(session_type: ipc.SessionType, x11: X11Options, fallback: Vt) Vt {
     if (build_options.x11_support and session_type == .x11) {
-        if (host_env_map.get("ZGSLD_X11_VT")) |raw| {
-            const number = try std.fmt.parseInt(u8, raw, 10);
-            if (number == 0) return error.InvalidTty;
-            return .{ .number = number };
-        }
+        if (x11.vt) |number| return .{ .number = number };
     }
     return fallback;
 }
@@ -42,6 +37,7 @@ pub fn start(
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
     tty_file: std.Io.File,
+    x11: X11Options,
 ) !Session {
     try env_mod.applyPamUserSessionEnv(T, pam, session_envmap, io, host_env_map, vt);
     try env_mod.applyTermEnv(session_envmap, host_env_map);
@@ -49,7 +45,7 @@ pub fn start(
     return Session.spawn(allocator, .{
         .io = io,
         .shutdown_conn = shutdown_conn,
-        .host_env_map = host_env_map,
+        .x11 = x11,
         .session_info = info,
         .envmap = session_envmap,
         .user_info = user_info,
@@ -81,7 +77,7 @@ pub const Session = struct {
     const SpawnOpts = struct {
         io: std.Io,
         shutdown_conn: *Shutdown.Connection,
-        host_env_map: *const std.process.Environ.Map,
+        x11: X11Options,
         session_info: ipc.SessionInfo,
         envmap: *std.process.Environ.Map,
         user_info: UserInfo,
@@ -104,7 +100,8 @@ pub const Session = struct {
             xserver = try XServer.spawn(allocator, .{
                 .io = opts.io,
                 .shutdown_conn = opts.shutdown_conn,
-                .host_env_map = opts.host_env_map,
+                .command = opts.x11.command,
+                .startup_timeout_seconds = opts.x11.startup_timeout_seconds,
                 .envmap = opts.envmap,
                 .vt = opts.vt,
                 .user = opts.user_info,

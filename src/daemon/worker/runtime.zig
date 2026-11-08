@@ -1,5 +1,7 @@
 const std = @import("std");
 const ipc = @import("ipc");
+const build_options = @import("build_options");
+const session = @import("runtime/session.zig");
 const fd_utils = @import("common").fd;
 const autologin = @import("runtime/autologin.zig");
 const greeter = @import("runtime/greeter.zig");
@@ -54,6 +56,7 @@ pub fn run(
     defer shutdown_conn.deinit();
 
     const vt = try Vt.parse(environ_map.get("ZGSLD_VT"));
+    const x11 = try parseX11Options(environ_map);
 
     switch (opts.session_class) {
         .greeter => {
@@ -78,6 +81,7 @@ pub fn run(
                 .command = greeter_cmd,
                 .session_type = greeter_session_type,
                 .vt = vt,
+                .x11 = x11,
             });
         },
         .user => {
@@ -95,6 +99,7 @@ pub fn run(
                     .flags = .{ .nonblocking = false },
                 },
                 .vt = vt,
+                .x11 = x11,
             });
         },
         .autologin => {
@@ -127,6 +132,7 @@ pub fn run(
                     },
                 },
                 .vt = vt,
+                .x11 = x11,
             });
         },
     }
@@ -135,4 +141,25 @@ pub fn run(
 fn parseZgsldSock(env_map: *const std.process.Environ.Map) !std.posix.fd_t {
     const fd = env_map.get("ZGSLD_SOCK") orelse return error.MissingZgsldSock;
     return std.fmt.parseInt(std.posix.fd_t, fd, 10);
+}
+
+fn parseX11Options(env_map: *const std.process.Environ.Map) !session.X11Options {
+    if (!build_options.x11_support) return {};
+
+    const timeout_raw = env_map.get("ZGSLD_X11_TIMEOUT_SECONDS") orelse
+        return error.MissingX11StartupTimeout;
+    const timeout = try std.fmt.parseInt(u32, timeout_raw, 10);
+    if (timeout == 0) return error.InvalidX11StartupTimeout;
+
+    const vt: ?u8 = if (env_map.get("ZGSLD_X11_VT")) |raw| blk: {
+        const number = try std.fmt.parseInt(u8, raw, 10);
+        if (number == 0) return error.InvalidTty;
+        break :blk number;
+    } else null;
+
+    return .{
+        .command = env_map.get("ZGSLD_X11_CMD") orelse "/bin/X",
+        .startup_timeout_seconds = timeout,
+        .vt = vt,
+    };
 }

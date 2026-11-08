@@ -27,6 +27,7 @@ pub const RunOpts = struct {
     service_name: [:0]const u8,
     ipc_socket: std.Io.File,
     vt: Vt,
+    x11: session_mod.X11Options,
 };
 
 const SessionSetup = struct {
@@ -188,6 +189,7 @@ fn runSession(
             pam,
             &session_setup.env,
             opts.vt,
+            opts.x11,
         );
     };
     defer session.deinit(opts.io);
@@ -267,9 +269,10 @@ fn startSession(
     pam: *Pam(PamCtx),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
+    x11: session_mod.X11Options,
 ) !session_mod.Session {
     log.debug("Starting session...", .{});
-    const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
+    const session_vt = session_mod.resolveSessionVt(info.session_type, x11, vt);
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tty_path = try session_vt.resolveTtyDevicePath(io, &tty_path_buf);
     try pam.setItem(.tty, tty_path);
@@ -287,5 +290,6 @@ fn startSession(
         session_envmap,
         session_vt,
         tty_file,
+        x11,
     );
 }
