@@ -254,6 +254,9 @@ fn runSession(
     var started = blk: {
         defer session_envmap.deinit();
         const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
+        var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tty_path = try session_vt.resolveTtyDevicePath(io, env_map, &tty_path_buf);
+        try pam.setItem(.{ .tty = tty_path });
         const tty_file = try session_vt.openSessionTty(io, env_map);
         errdefer if (tty_file.handle > 2) tty_file.close(io);
 
