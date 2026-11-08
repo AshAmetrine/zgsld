@@ -43,7 +43,10 @@ pub fn start(
     pam: *Pam(T),
     opts: StartOptions,
 ) !Session {
-    try env_mod.applyPamUserSessionEnv(T, pam, opts.session_envmap, opts.io, opts.host_env_map, opts.vt);
+    try env_mod.preparePamUserEnv(T, pam, opts.session_envmap);
+    try env_mod.preparePamSessionEnv(T, pam, opts.io, opts.host_env_map, opts.vt, .user);
+    try pam.openSession(.{});
+    try env_mod.applyPamEnv(T, pam, opts.session_envmap, opts.io, opts.vt);
     try env_mod.applyTermEnv(opts.session_envmap, opts.host_env_map);
     const user_info = try env_mod.applyUserEnv(T, pam, opts.session_envmap);
     return Session.spawn(allocator, .{

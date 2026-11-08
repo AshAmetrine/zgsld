@@ -41,7 +41,8 @@ pub fn run(opts: RunOpts) !void {
         const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
         try pam.setItem(.tty, tty_path);
 
-        try env_mod.openPamSession(void, &pam, opts.io, opts.env_map, session_vt, .greeter);
+        try env_mod.preparePamSessionEnv(void, &pam, opts.io, opts.env_map, session_vt, .greeter);
+        try pam.openSession(.{});
         var envmap = try pam.createEnvListMap();
         defer envmap.deinit();
         const user_info = try env_mod.applyUserEnv(void, &pam, &envmap);

@@ -4,22 +4,25 @@ const Pam = @import("pam").Pam;
 const UserInfo = @import("user.zig").UserInfo;
 const Vt = @import("vt").Vt;
 
-pub fn applyPamUserSessionEnv(
+pub fn preparePamUserEnv(
     comptime T: type,
     pam: *Pam(T),
     session_envmap: *std.process.Environ.Map,
-    io: std.Io,
-    host_env_map: *const std.process.Environ.Map,
-    vt: Vt,
 ) !void {
     for ([_][]const u8{ "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "XDG_SESSION_TYPE" }) |key| {
         if (session_envmap.get(key)) |value| {
             try pam.putEnvAlloc(key, value);
         }
     }
+}
 
-    try openPamSession(T, pam, io, host_env_map, vt, .user);
-
+pub fn applyPamEnv(
+    comptime T: type,
+    pam: *Pam(T),
+    session_envmap: *std.process.Environ.Map,
+    io: std.Io,
+    vt: Vt,
+) !void {
     // Add pam env list to the envmap (overwrites)
     try pam.addEnvListToMap(session_envmap);
     if (vt == .unmanaged and vt.ttyNumber(io) == null) {
@@ -28,7 +31,7 @@ pub fn applyPamUserSessionEnv(
     }
 }
 
-pub fn openPamSession(
+pub fn preparePamSessionEnv(
     comptime T: type,
     pam: *Pam(T),
     io: std.Io,
@@ -52,7 +55,6 @@ pub fn openPamSession(
     }
 
     try pam.putEnv("XDG_SESSION_CLASS=" ++ @tagName(session_class));
-    try pam.openSession(.{});
 }
 
 pub fn applyUserEnv(
