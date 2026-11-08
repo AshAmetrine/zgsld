@@ -34,7 +34,7 @@ pub fn run(opts: RunOpts) !void {
 
         const session_vt = try session_mod.resolveSessionVt(opts.session_type, opts.env_map, opts.vt);
         var tty_file = try session_vt.openSessionTty(opts.io);
-        defer if (tty_file.handle > 2) tty_file.close(opts.io);
+        errdefer if (tty_file.handle > 2) tty_file.close(opts.io);
 
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
@@ -67,10 +67,11 @@ pub fn run(opts: RunOpts) !void {
             .envmap = &envmap,
             .user_info = user_info,
             .vt = session_vt,
+            .tty_file = tty_file,
             .stderr = .inherit,
         });
     };
     defer session.deinit(opts.io);
 
-    try opts.shutdown_conn.wait(&session.child, .session);
+    try session.wait();
 }

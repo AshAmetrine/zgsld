@@ -30,6 +30,7 @@ pub fn resolveSessionVt(
     return fallback;
 }
 
+/// Takes ownership of tty_file on success.
 pub fn start(
     comptime T: type,
     allocator: std.mem.Allocator,
@@ -40,6 +41,7 @@ pub fn start(
     pam: *Pam(T),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
+    tty_file: std.Io.File,
 ) !Session {
     try env_mod.applyPamUserSessionEnv(T, pam, session_envmap, io, host_env_map, vt);
     try env_mod.applyTermEnv(session_envmap, host_env_map);
@@ -52,17 +54,24 @@ pub fn start(
         .envmap = session_envmap,
         .user_info = user_info,
         .vt = vt,
+        .tty_file = tty_file,
     });
 }
 
 pub const Session = struct {
     child: std.process.Child,
+    tty_file: std.Io.File,
     shutdown_conn: *Shutdown.Connection,
 
     x11: if (build_options.x11_support) ?XServer else void =
         if (build_options.x11_support) null else {},
 
+    pub fn wait(self: *Session) !void {
+        try self.shutdown_conn.wait(&self.child, .session);
+    }
+
     pub fn deinit(self: *Session, io: std.Io) void {
+        defer if (self.tty_file.handle > 2) self.tty_file.close(io);
         self.shutdown_conn.stop(&self.child, .session);
         if (build_options.x11_support) {
             if (self.x11) |*xsession| xsession.deinit(io);
@@ -77,9 +86,11 @@ pub const Session = struct {
         envmap: *std.process.Environ.Map,
         user_info: UserInfo,
         vt: Vt,
+        tty_file: std.Io.File,
         stderr: StderrMode = .tty,
     };
 
+    // Takes ownership of opts.tty_file on success.
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOpts) !Session {
         if (!build_options.x11_support and opts.session_info.session_type == .x11) {
             return error.X11UnsupportedBuild;
@@ -116,6 +127,7 @@ pub const Session = struct {
         });
         return .{
             .child = session_child,
+            .tty_file = opts.tty_file,
             .shutdown_conn = opts.shutdown_conn,
             .x11 = xserver,
         };

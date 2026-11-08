@@ -139,33 +139,37 @@ pub fn run(opts: RunOpts) !void {
                 };
                 try writeAuthResult(&pam_ctx, true);
 
-                var session_setup = (getSession(
-                    opts.allocator,
-                    ipc_conn,
-                    &event_buf,
-                ) catch |err| {
-                    if (err == error.EndOfStream and signals.shutdownRequested()) return;
-                    return err;
-                }) orelse {
-                    cancelled = true;
-                    continue;
+                var session = blk: {
+                    var session_setup = (getSession(
+                        opts.allocator,
+                        ipc_conn,
+                        &event_buf,
+                    ) catch |err| {
+                        if (err == error.EndOfStream and signals.shutdownRequested()) return;
+                        return err;
+                    }) orelse {
+                        cancelled = true;
+                        continue;
+                    };
+                    defer session_setup.env.deinit();
+                    if (signals.shutdownRequested()) return;
+                    opts.ipc_socket.close(opts.io);
+                    ipc_closed = true;
+                    break :blk try startSession(
+                        opts.allocator,
+                        opts.io,
+                        opts.shutdown_conn,
+                        opts.env_map,
+                        session_setup.info,
+                        &pam,
+                        &session_setup.env,
+                        opts.vt,
+                    );
                 };
-                if (signals.shutdownRequested()) {
-                    session_setup.env.deinit();
-                    return;
-                }
-                opts.ipc_socket.close(opts.io);
-                ipc_closed = true;
-                try runSession(
-                    opts.allocator,
-                    opts.io,
-                    opts.shutdown_conn,
-                    opts.env_map,
-                    session_setup.info,
-                    &pam,
-                    &session_setup.env,
-                    opts.vt,
-                );
+                defer session.deinit(opts.io);
+
+                log.debug("Waiting for session to end...", .{});
+                try session.wait();
                 return;
             },
             else => return error.UnexpectedEvent,
@@ -234,7 +238,7 @@ fn getSession(
     }
 }
 
-fn runSession(
+fn startSession(
     allocator: std.mem.Allocator,
     io: std.Io,
     shutdown_conn: *Shutdown.Connection,
@@ -243,33 +247,25 @@ fn runSession(
     pam: *Pam(PamCtx),
     session_envmap: *std.process.Environ.Map,
     vt: Vt,
-) !void {
+) !session_mod.Session {
     log.debug("Starting session...", .{});
-    var started = blk: {
-        defer session_envmap.deinit();
-        const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
-        var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = try session_vt.resolveTtyDevicePath(io, &tty_path_buf);
-        try pam.setItem(.tty, tty_path);
-        const tty_file = try session_vt.openSessionTty(io);
-        errdefer if (tty_file.handle > 2) tty_file.close(io);
+    const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
+    var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tty_path = try session_vt.resolveTtyDevicePath(io, &tty_path_buf);
+    try pam.setItem(.tty, tty_path);
+    const tty_file = try session_vt.openSessionTty(io);
+    errdefer if (tty_file.handle > 2) tty_file.close(io);
 
-        const session = try session_mod.start(
-            PamCtx,
-            allocator,
-            io,
-            shutdown_conn,
-            env_map,
-            info,
-            pam,
-            session_envmap,
-            session_vt,
-        );
-        break :blk .{ .session = session, .tty_file = tty_file };
-    };
-    defer if (started.tty_file.handle > 2) started.tty_file.close(io);
-    defer started.session.deinit(io);
-
-    log.debug("Waiting for session to end...", .{});
-    try shutdown_conn.wait(&started.session.child, .session);
+    return try session_mod.start(
+        PamCtx,
+        allocator,
+        io,
+        shutdown_conn,
+        env_map,
+        info,
+        pam,
+        session_envmap,
+        session_vt,
+        tty_file,
+    );
 }

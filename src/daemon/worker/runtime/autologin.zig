@@ -32,10 +32,10 @@ pub fn run(opts: RunOpts) !void {
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 
-    var tty_file = try session_vt.openSessionTty(opts.io);
-    defer if (tty_file.handle > 2) tty_file.close(opts.io);
-
     var session = blk: {
+        const tty_file = try session_vt.openSessionTty(opts.io);
+        errdefer if (tty_file.handle > 2) tty_file.close(opts.io);
+
         var session_envmap = std.process.Environ.Map.init(opts.allocator);
         defer session_envmap.deinit();
         if (opts.info.session_type == .x11) {
@@ -51,9 +51,10 @@ pub fn run(opts: RunOpts) !void {
             &pam,
             &session_envmap,
             session_vt,
+            tty_file,
         );
     };
     defer session.deinit(opts.io);
 
-    try opts.shutdown_conn.wait(&session.child, .session);
+    try session.wait();
 }
