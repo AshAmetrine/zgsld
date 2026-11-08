@@ -139,32 +139,20 @@ fn runDaemon(self: Self) !void {
         });
     }
 
-    var cmd_buf: std.ArrayList(u8) = .empty;
-    defer cmd_buf.deinit(self.process.gpa);
-
-    if (zgsld_config.greeter.command) |greeter_wrapper| {
-        try cmd_buf.appendSlice(self.process.gpa, greeter_wrapper);
-        if (greeter_wrapper.len != 0 and greeter_wrapper[greeter_wrapper.len - 1] != ' ') {
-            try cmd_buf.append(self.process.gpa, ' ');
-        }
-    }
-
     var self_exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const self_exe_path_len = try std.process.executablePath(self.process.io, &self_exe_path_buf);
     const self_exe_path = self_exe_path_buf[0..self_exe_path_len];
 
-    try appendShellQuotedArg(&cmd_buf, self.process.gpa, self_exe_path);
+    var command = try buildGreeterCommand(
+        self.process.gpa,
+        zgsld_config.greeter.command,
+        self_exe_path,
+        self.process.args,
+    );
+    defer command.deinit(self.process.gpa);
+    zgsld_config.greeter.command = command.items;
 
-    var args_iter = self.process.args.iterate();
-    _ = args_iter.skip();
-    while (args_iter.next()) |arg| {
-        try cmd_buf.append(self.process.gpa, ' ');
-        try appendShellQuotedArg(&cmd_buf, self.process.gpa, arg);
-    }
-
-    zgsld_config.greeter.command = cmd_buf.items;
-
-    log.debug("Greeter Cmd: {s}", .{cmd_buf.items});
+    log.debug("Greeter Cmd: {s}", .{command.items});
     log.debug("Greeter Path: {s}", .{self_exe_path});
     log.debug("Greeter User: {s}", .{zgsld_config.greeter.user});
     log.debug("User Session PAM Service Name: {s}", .{zgsld_config.session.service_name});
@@ -175,6 +163,34 @@ fn runDaemon(self: Self) !void {
     try daemon.run(self.process, .{
         .config = zgsld_config,
     });
+}
+
+fn buildGreeterCommand(
+    allocator: std.mem.Allocator,
+    wrapper: ?[]const u8,
+    executable_path: []const u8,
+    args: std.process.Args,
+) !std.ArrayList(u8) {
+    var cmd_buf: std.ArrayList(u8) = .empty;
+    errdefer cmd_buf.deinit(allocator);
+
+    if (wrapper) |greeter_wrapper| {
+        try cmd_buf.appendSlice(allocator, greeter_wrapper);
+        if (greeter_wrapper.len != 0 and greeter_wrapper[greeter_wrapper.len - 1] != ' ') {
+            try cmd_buf.append(allocator, ' ');
+        }
+    }
+
+    try appendShellQuotedArg(&cmd_buf, allocator, executable_path);
+
+    var args_iter = args.iterate();
+    _ = args_iter.skip();
+    while (args_iter.next()) |arg| {
+        try cmd_buf.append(allocator, ' ');
+        try appendShellQuotedArg(&cmd_buf, allocator, arg);
+    }
+
+    return cmd_buf;
 }
 
 fn greeterContext(self: Self, ipc_conn: *ipc.Connection) RunContext {
