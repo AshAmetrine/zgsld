@@ -25,6 +25,7 @@ pub const Vt = union(enum) {
     }
 
     pub fn ttyNumber(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) ?u8 {
+        _ = env_map;
         return switch (self) {
             .number => |vt_num| vt_num,
             .current => queryCurrentTtyNumber(io) catch blk: {
@@ -33,8 +34,9 @@ pub const Vt = union(enum) {
                 break :blk parseTtyNumberFromPath(tty_path) catch null;
             },
             .unmanaged => blk: {
-                const raw = env_map.get("XDG_VTNR") orelse break :blk null;
-                break :blk std.fmt.parseInt(u8, raw, 10) catch null;
+                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const tty_path = getInheritedTtyDevicePath(&path_buf) catch break :blk null;
+                break :blk parseTtyNumberFromPath(tty_path) catch null;
             },
         };
     }
@@ -71,6 +73,7 @@ pub const Vt = union(enum) {
         env_map: *const std.process.Environ.Map,
         buf: *[std.fs.max_path_bytes]u8,
     ) ![:0]const u8 {
+        _ = env_map;
         switch (self) {
             .number => |vt_num| {
                 if (getTtyDevicePath(buf, vt_num)) |tty_path| {
@@ -90,13 +93,7 @@ pub const Vt = union(enum) {
                     log.warn("Failed to resolve current tty number: {s}", .{@errorName(err)});
                 }
             },
-            .unmanaged => if (self.ttyNumber(io, env_map)) |vt_num| {
-                if (getTtyDevicePath(buf, vt_num)) |tty_path| {
-                    return tty_path;
-                } else |err| {
-                    log.warn("Failed to resolve unmanaged tty device path: {s}", .{@errorName(err)});
-                }
-            },
+            .unmanaged => {},
         }
 
         if (getInheritedTtyDevicePath(buf)) |tty_path| {

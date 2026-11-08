@@ -23,14 +23,23 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
     var worker_envmap = std.process.Environ.Map.init(opts.allocator);
     defer worker_envmap.deinit();
 
-    for ([_][]const u8{ "PATH", "TERM", "XDG_SEAT" }) |key| {
+    for ([_][]const u8{ "PATH", "TERM" }) |key| {
         if (opts.env_map.get(key)) |value| {
             try worker_envmap.put(key, value);
         }
     }
+    const vt_num = opts.config.vt.ttyNumber(opts.io, opts.env_map);
+    // PAM also reads the process environment. A PTY must not inherit its outer seat.
+    if (opts.config.vt != .unmanaged or vt_num != null) {
+        if (opts.env_map.get("XDG_SEAT")) |seat| {
+            try worker_envmap.put("XDG_SEAT", seat);
+        }
+    }
     if (opts.config.vt == .unmanaged) {
-        if (opts.env_map.get("XDG_VTNR")) |vtnr| {
-            try worker_envmap.put("XDG_VTNR", vtnr);
+        if (vt_num) |number| {
+            var vt_buf: [3]u8 = undefined;
+            const value = try std.fmt.bufPrint(&vt_buf, "{d}", .{number});
+            try worker_envmap.put("XDG_VTNR", value);
         }
     }
     try putZgsldVtEnv(&worker_envmap, opts.config.vt);

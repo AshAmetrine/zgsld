@@ -22,6 +22,10 @@ pub fn applyPamUserSessionEnv(
 
     // Add pam env list to the envmap (overwrites)
     try pam.addEnvListToMap(session_envmap);
+    if (vt == .unmanaged and vt.ttyNumber(io, host_env_map) == null) {
+        _ = session_envmap.swapRemove("XDG_SEAT");
+        _ = session_envmap.swapRemove("XDG_VTNR");
+    }
 }
 
 pub fn openPamSession(
@@ -32,16 +36,19 @@ pub fn openPamSession(
     vt: Vt,
     comptime session_class: enum { greeter, user },
 ) !void {
-    if (vt.ttyNumber(io, host_env_map)) |vt_num| {
+    const vt_num = vt.ttyNumber(io, host_env_map);
+    if (vt_num) |number| {
         var vt_buf: [3]u8 = undefined;
-        const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{vt_num});
+        const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{number});
         try pam.putEnvAlloc("XDG_VTNR", vt_value);
     }
 
-    if (host_env_map.get("XDG_SEAT")) |seat| {
-        try pam.putEnvAlloc("XDG_SEAT", seat);
-    } else {
-        try pam.putEnv("XDG_SEAT=seat0");
+    if (vt != .unmanaged or vt_num != null) {
+        if (host_env_map.get("XDG_SEAT")) |seat| {
+            try pam.putEnvAlloc("XDG_SEAT", seat);
+        } else {
+            try pam.putEnv("XDG_SEAT=seat0");
+        }
     }
 
     try pam.putEnv("XDG_SESSION_CLASS=" ++ @tagName(session_class));
