@@ -38,7 +38,6 @@ pub fn run(opts: RunOpts) !void {
     var ipc_closed = false;
     defer if (!ipc_closed) opts.ipc_socket.close(opts.io);
 
-    var saw_auth = false;
     var event_buf: [ipc.event_buf_size]u8 = undefined;
     var rbuf: [ipc.event_buf_size]u8 = undefined;
     var wbuf: [ipc.event_buf_size]u8 = undefined;
@@ -60,12 +59,9 @@ pub fn run(opts: RunOpts) !void {
             cancelled = false;
         }
         log.debug("Waiting for event", .{});
-        const event = ipc_conn.readEvent(&event_buf) catch |err| {
-            if (err == error.EndOfStream and !saw_auth) {
-                if (signals.shutdownRequested()) return;
-                std.process.exit(2);
-            }
-            return err;
+        const event = ipc_conn.readEvent(&event_buf) catch |err| switch (err) {
+            error.EndOfStream => return,
+            else => return err,
         };
         switch (event) {
             .login_cancel => {
@@ -74,7 +70,6 @@ pub fn run(opts: RunOpts) !void {
                 continue;
             },
             .pam_start_auth => |auth| {
-                saw_auth = true;
                 var pam_ctx: PamCtx = .{
                     .ipc_conn = ipc_conn,
                 };

@@ -324,6 +324,7 @@ fn forwardIpc(
         forwardIpcThread,
         .{&worker_to_greeter},
     );
+    var session_started = false;
     {
         defer {
             _ = std.c.shutdown(greeter_file.handle, 2);
@@ -359,9 +360,16 @@ fn forwardIpc(
 
             try worker_conn.writeEvent(&event);
             try worker_conn.transport.writer.flush();
+            if (event == .start_session) session_started = true;
         }
     }
 
+    if (Shutdown.shutdownRequested()) return;
+
+    if (!session_started) {
+        log.err("Greeter disconnected before starting a session", .{});
+        return error.GreeterError;
+    }
     return worker_to_greeter.result;
 }
 
@@ -369,15 +377,7 @@ fn waitWorker(shutdown: *Shutdown, proc: *Shutdown.Worker) !void {
     if (proc.process.id == null) return;
     const term = try shutdown.wait(proc);
     if (proc.forced) return;
-    const code: u8 = if (term == .exited) term.exited else 1;
-    switch (code) {
-        0 => {},
-        2 => {
-            log.err("Greeter exited before starting auth", .{});
-            return error.GreeterError;
-        },
-        else => return error.WorkerError,
-    }
+    if (term != .exited or term.exited != 0) return error.WorkerError;
 }
 
 fn forwardIpcThread(ctx: *ForwardIpcCtx) void {
