@@ -28,7 +28,7 @@ pub fn run(opts: RunOpts) !void {
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tty_path = try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
-    try pam.setItem(.{ .tty = tty_path });
+    try pam.setItem(.tty, tty_path);
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 
@@ -47,7 +47,6 @@ pub fn run(opts: RunOpts) !void {
             opts.io,
             opts.shutdown_conn,
             opts.env_map,
-            opts.user,
             opts.info,
             &pam,
             &session_envmap,

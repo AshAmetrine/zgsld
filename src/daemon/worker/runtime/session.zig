@@ -36,7 +36,6 @@ pub fn start(
     io: std.Io,
     shutdown_conn: *Shutdown.Connection,
     host_env_map: *const std.process.Environ.Map,
-    user: [:0]const u8,
     info: ipc.SessionInfo,
     pam: *Pam(T),
     session_envmap: *std.process.Environ.Map,
@@ -44,7 +43,7 @@ pub fn start(
 ) !Session {
     try env_mod.applyPamUserSessionEnv(T, pam, session_envmap, io, host_env_map, vt);
     try env_mod.applyTermEnv(session_envmap, host_env_map);
-    const user_info = try env_mod.applyUserEnv(session_envmap, user);
+    const user_info = try env_mod.applyUserEnv(T, pam, session_envmap);
     return Session.spawn(allocator, .{
         .io = io,
         .shutdown_conn = shutdown_conn,

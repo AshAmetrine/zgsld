@@ -102,7 +102,7 @@ pub fn run(opts: RunOpts) !void {
                     try reportInternalError(&pam_ctx, err);
                     continue;
                 };
-                pam.setItem(.{ .tty = tty_path }) catch |err| {
+                pam.setItem(.tty, tty_path) catch |err| {
                     try reportInternalError(&pam_ctx, err);
                     continue;
                 };
@@ -155,7 +155,6 @@ pub fn run(opts: RunOpts) !void {
                     opts.io,
                     opts.shutdown_conn,
                     opts.env_map,
-                    user_z,
                     session_setup.info,
                     &pam,
                     &session_setup.env,
@@ -239,7 +238,6 @@ fn runSession(
     io: std.Io,
     shutdown_conn: *Shutdown.Connection,
     env_map: *const std.process.Environ.Map,
-    user_z: [:0]const u8,
     info: ipc.SessionInfo,
     pam: *Pam(PamCtx),
     session_envmap: *std.process.Environ.Map,
@@ -251,7 +249,7 @@ fn runSession(
         const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const tty_path = try session_vt.resolveTtyDevicePath(io, env_map, &tty_path_buf);
-        try pam.setItem(.{ .tty = tty_path });
+        try pam.setItem(.tty, tty_path);
         const tty_file = try session_vt.openSessionTty(io, env_map);
         errdefer if (tty_file.handle > 2) tty_file.close(io);
 
@@ -261,7 +259,6 @@ fn runSession(
             io,
             shutdown_conn,
             env_map,
-            user_z,
             info,
             pam,
             session_envmap,

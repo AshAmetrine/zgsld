@@ -2,7 +2,6 @@ const std = @import("std");
 const ipc = @import("ipc");
 const env_mod = @import("env.zig");
 const Pam = @import("pam").Pam;
-const UserInfo = @import("user.zig").UserInfo;
 const session_mod = @import("session.zig");
 const Vt = @import("vt").Vt;
 const Shutdown = @import("../../Shutdown.zig");
@@ -23,19 +22,12 @@ pub const RunOpts = struct {
 };
 
 pub fn run(opts: RunOpts) !void {
-    const pw = std.c.getpwnam(opts.username) orelse return error.GreeterUserNotFound;
     var pam = try Pam(void).init(opts.allocator, .{
         .user = opts.username,
         .service_name = opts.service_name,
         .state = .discardAll(),
     });
     defer pam.deinit();
-
-    const user_info: UserInfo = .{
-        .username = opts.username,
-        .uid = pw.uid,
-        .gid = pw.gid,
-    };
 
     var session = blk: {
         defer _ = std.c.close(opts.ipc_fd);
@@ -46,11 +38,12 @@ pub fn run(opts: RunOpts) !void {
 
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const tty_path = try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
-        try pam.setItem(.{ .tty = tty_path });
+        try pam.setItem(.tty, tty_path);
 
         try env_mod.openPamSession(void, &pam, opts.io, opts.env_map, session_vt, .greeter);
         var envmap = try pam.createEnvListMap();
         defer envmap.deinit();
+        const user_info = try env_mod.applyUserEnv(void, &pam, &envmap);
 
         var fd_buf: [16]u8 = undefined;
         const zgsld_sock = try std.fmt.bufPrint(&fd_buf, "{d}", .{opts.ipc_fd});

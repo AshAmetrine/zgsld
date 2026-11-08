@@ -55,7 +55,14 @@ pub fn openPamSession(
     try pam.openSession(.{});
 }
 
-pub fn applyUserEnv(session_envmap: *std.process.Environ.Map, user: [:0]const u8) !UserInfo {
+pub fn applyUserEnv(
+    comptime T: type,
+    pam: *Pam(T),
+    session_envmap: *std.process.Environ.Map,
+) !UserInfo {
+    // PAM modules can change the account during authentication or session setup.
+    const user = try pam.getItem(.user) orelse return error.PamUserUnavailable;
+    if (user.len == 0) return error.PamUserUnavailable;
     const pw = std.c.getpwnam(user) orelse return error.UserUnknown;
 
     if (pw.dir) |home_dir| {
