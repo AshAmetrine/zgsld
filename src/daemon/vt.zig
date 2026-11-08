@@ -45,27 +45,11 @@ pub const Vt = union(enum) {
             .unmanaged, .current => return,
         };
 
-        var console = try openVtControlDevice(io);
-        defer console.close(io);
-
-        if (comptime builtin.os.tag == .linux) {
-            var setactivate = std.mem.zeroes(c.struct_vt_setactivate);
-            setactivate.console = vt_num;
-            setactivate.mode.mode = c.VT_AUTO;
-            const status = c.ioctl(console.handle, c.VT_SETACTIVATE, &setactivate);
-            if (status != 0) return error.FailedToActivateTty;
-        } else {
-            var mode = std.mem.zeroes(c.struct_vt_mode);
-            mode.mode = c.VT_AUTO;
-            const mode_status = c.ioctl(console.handle, c.VT_SETMODE, &mode);
-            if (mode_status != 0) return error.FailedToSetTtyMode;
-
-            const status = c.ioctl(console.handle, c.VT_ACTIVATE, @as(c_int, vt_num));
-            if (status != 0) return error.FailedToActivateTty;
-        }
-
-        const wait_status = c.ioctl(console.handle, c.VT_WAITACTIVE, @as(c_int, vt_num));
-        if (wait_status != 0) return error.FailedToWaitForActiveTty;
+        return switch (builtin.os.tag) {
+            .linux => linux.activate(io, vt_num),
+            .freebsd => freebsd.activate(io, vt_num),
+            else => error.UnsupportedPlatform,
+        };
     }
 
     pub fn open(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
@@ -283,6 +267,20 @@ fn parseTtyNumberFromPath(tty_path: []const u8) !u8 {
 }
 
 const linux = struct {
+    fn activate(io: std.Io, vt_num: u8) !void {
+        var console = try openVtControlDevice(io);
+        defer console.close(io);
+
+        var setactivate = std.mem.zeroes(c.struct_vt_setactivate);
+        setactivate.console = vt_num;
+        setactivate.mode.mode = c.VT_AUTO;
+        const status = c.ioctl(console.handle, c.VT_SETACTIVATE, &setactivate);
+        if (status != 0) return error.FailedToActivateTty;
+
+        const wait_status = c.ioctl(console.handle, c.VT_WAITACTIVE, @as(c_int, vt_num));
+        if (wait_status != 0) return error.FailedToWaitForActiveTty;
+    }
+
     fn queryCurrentTtyNumber(io: std.Io) !u8 {
         var tty_file = try openControllingTty(io, .read_only);
         defer if (tty_file.handle > 2) tty_file.close(io);
@@ -308,6 +306,25 @@ const linux = struct {
 };
 
 const freebsd = struct {
+    fn activate(io: std.Io, vt_num: u8) !void {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tty_path = try getTtyDevicePath(&path_buf, vt_num);
+        // FreeBSD requires the target VT to remain open while switching to it.
+        var tty_file = try std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = .read_write });
+        defer tty_file.close(io);
+
+        var mode = std.mem.zeroes(c.struct_vt_mode);
+        mode.mode = c.VT_AUTO;
+        const mode_status = c.ioctl(tty_file.handle, c.VT_SETMODE, &mode);
+        if (mode_status != 0) return error.FailedToSetTtyMode;
+
+        const status = c.ioctl(tty_file.handle, c.VT_ACTIVATE, @as(c_int, vt_num));
+        if (status != 0) return error.FailedToActivateTty;
+
+        const wait_status = c.ioctl(tty_file.handle, c.VT_WAITACTIVE, @as(c_int, vt_num));
+        if (wait_status != 0) return error.FailedToWaitForActiveTty;
+    }
+
     fn queryCurrentTtyNumber(io: std.Io) !u8 {
         var tty_file = try openControllingTty(io, .read_only);
         defer if (tty_file.handle > 2) tty_file.close(io);
@@ -316,8 +333,10 @@ const freebsd = struct {
         const status = c.ioctl(tty_file.handle, c.VT_GETINDEX, &tty_index);
         if (status != 0) return error.FailedToGetTtyIndex;
 
-        const index = std.math.cast(u8, tty_index) orelse return error.InvalidTty;
-        return std.math.add(u8, index, 1) catch error.InvalidTty;
+        // VT_GETINDEX is already one-based, unlike /dev/ttyv names.
+        const number = std.math.cast(u8, tty_index) orelse return error.InvalidTty;
+        if (number == 0) return error.InvalidTty;
+        return number;
     }
 
     fn parseTtyNumberFromPath(tty_path: []const u8) !u8 {
