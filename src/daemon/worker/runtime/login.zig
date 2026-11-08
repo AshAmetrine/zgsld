@@ -136,11 +136,14 @@ pub fn run(opts: RunOpts) !void {
                 };
                 try writeAuthResult(&pam_ctx, true);
 
-                var session_setup = try getSession(
+                var session_setup = (getSession(
                     opts.allocator,
                     ipc_conn,
                     &event_buf,
-                ) orelse {
+                ) catch |err| {
+                    if (err == error.EndOfStream and signals.shutdownRequested()) return;
+                    return err;
+                }) orelse {
                     cancelled = true;
                     continue;
                 };
@@ -206,12 +209,7 @@ fn getSession(
     errdefer session_envmap.deinit();
 
     while (true) {
-        const session_event = ipc_conn.readEvent(event_buf) catch |err| {
-            if (err == error.EndOfStream and signals.shutdownRequested()) {
-                std.process.exit(0);
-            }
-            return err;
-        };
+        const session_event = try ipc_conn.readEvent(event_buf);
         switch (session_event) {
             .login_cancel => {
                 log.debug("Login cancelled before session start", .{});
