@@ -96,6 +96,10 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
     const exe_path_len = try std.process.executablePath(process.io, &exe_path_buf);
     const exe_path = exe_path_buf[0..exe_path_len];
 
+    if (build_options.x11_support and opts.config.x11.startup_timeout_seconds == 0) {
+        return error.InvalidX11StartupTimeout;
+    }
+
     var shutdown = try Shutdown.init(process.io);
     defer shutdown.deinit();
     try shutdown.start();

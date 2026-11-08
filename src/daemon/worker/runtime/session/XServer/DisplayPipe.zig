@@ -36,10 +36,10 @@ pub fn wait(
     io: std.Io,
     shutdown_conn: *const Shutdown.Connection,
     display: u8,
-    timeout_ms: u32,
+    timeout_seconds: u32,
 ) !void {
     std.debug.assert(self.write_file == null);
-    const deadline = std.Io.Clock.awake.now(io).addDuration(.fromMilliseconds(timeout_ms));
+    const deadline = std.Io.Clock.awake.now(io).addDuration(.fromSeconds(timeout_seconds));
     var expected_buf: [4]u8 = undefined;
     const expected = try std.fmt.bufPrint(&expected_buf, "{d}\n", .{display});
     var response: [4]u8 = undefined;
@@ -70,6 +70,7 @@ pub fn wait(
             if (err == error.EndOfStream) return error.InvalidDisplayResponse;
             return err;
         };
+        if (count == 0) return error.InvalidDisplayResponse;
         used += count;
         if (used > expected.len) return error.InvalidDisplayResponse;
         if (!std.mem.eql(u8, response[0..used], expected[0..used])) {

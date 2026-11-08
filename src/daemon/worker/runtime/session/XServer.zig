@@ -24,6 +24,11 @@ pub const Options = struct {
 };
 
 pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
+    const timeout_raw = opts.host_env_map.get("ZGSLD_X11_TIMEOUT_SECONDS") orelse
+        return error.MissingX11StartupTimeout;
+    const timeout_seconds = try std.fmt.parseInt(u32, timeout_raw, 10);
+    if (timeout_seconds == 0) return error.InvalidX11StartupTimeout;
+
     const display_num = try findFreeDisplay(opts.io);
     var display_buf: [5]u8 = undefined;
     const display = try std.fmt.bufPrintSentinel(&display_buf, ":{d}", .{display_num}, 0);
@@ -105,7 +110,7 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
     var server = Shutdown.Connection.childFromPid(pid);
     errdefer opts.shutdown_conn.stop(&server, .x11);
 
-    const ready_result = ready.wait(opts.io, opts.shutdown_conn, display_num, 5000);
+    const ready_result = ready.wait(opts.io, opts.shutdown_conn, display_num, timeout_seconds);
     if (hasExited(pid)) {
         server.id = null;
         try opts.shutdown_conn.exited(.x11);

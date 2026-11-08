@@ -45,6 +45,13 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
     try putZgsldVtEnv(&worker_envmap, opts.config.vt);
     if (build_options.x11_support) {
         try worker_envmap.put("ZGSLD_X11_CMD", opts.config.x11.command);
+        var timeout_buf: [10]u8 = undefined;
+        const timeout = try std.fmt.bufPrint(
+            &timeout_buf,
+            "{d}",
+            .{opts.config.x11.startup_timeout_seconds},
+        );
+        try worker_envmap.put("ZGSLD_X11_TIMEOUT_SECONDS", timeout);
         if (opts.config.x11.vt) |x11_vt| {
             var x11_vt_buf: [8]u8 = undefined;
             const x11_vt_value = try std.fmt.bufPrint(&x11_vt_buf, "{d}", .{x11_vt});

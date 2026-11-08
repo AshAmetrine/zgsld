@@ -13,6 +13,9 @@ const X11Config = struct {
 
     /// VT used for X11 sessions. `null` follows the main `vt` setting.
     vt: ?u8 = null,
+
+    /// Timeout for Xorg startup
+    startup_timeout_seconds: u32 = 10,
 };
 
 const GreeterConfig = struct {
