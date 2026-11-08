@@ -27,12 +27,12 @@ pub fn run(opts: RunOpts) !void {
     const session_vt = try session_mod.resolveSessionVt(opts.info.session_type, opts.env_map, opts.vt);
 
     var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tty_path = try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
+    const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
     try pam.setItem(.tty, tty_path);
     try pam.accountMgmt(.{});
     try pam.setCred(.{ .action = .establish });
 
-    var tty_file = try session_vt.openSessionTty(opts.io, opts.env_map);
+    var tty_file = try session_vt.openSessionTty(opts.io);
     defer if (tty_file.handle > 2) tty_file.close(opts.io);
 
     var session = blk: {

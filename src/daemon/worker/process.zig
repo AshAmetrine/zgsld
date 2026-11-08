@@ -28,7 +28,7 @@ pub fn spawn(opts: SpawnOpts) !std.process.Child {
             try worker_envmap.put(key, value);
         }
     }
-    const vt_num = opts.config.vt.ttyNumber(opts.io, opts.env_map);
+    const vt_num = opts.config.vt.ttyNumber(opts.io);
     // PAM also reads the process environment. A PTY must not inherit its outer seat.
     if (opts.config.vt != .unmanaged or vt_num != null) {
         if (opts.env_map.get("XDG_SEAT")) |seat| {

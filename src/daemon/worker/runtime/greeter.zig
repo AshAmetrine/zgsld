@@ -33,11 +33,11 @@ pub fn run(opts: RunOpts) !void {
         defer _ = std.c.close(opts.ipc_fd);
 
         const session_vt = try session_mod.resolveSessionVt(opts.session_type, opts.env_map, opts.vt);
-        var tty_file = try session_vt.openSessionTty(opts.io, opts.env_map);
+        var tty_file = try session_vt.openSessionTty(opts.io);
         defer if (tty_file.handle > 2) tty_file.close(opts.io);
 
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = try session_vt.resolveTtyDevicePath(opts.io, opts.env_map, &tty_path_buf);
+        const tty_path = try session_vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
         try pam.setItem(.tty, tty_path);
 
         try env_mod.openPamSession(void, &pam, opts.io, opts.env_map, session_vt, .greeter);

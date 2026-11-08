@@ -114,17 +114,17 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
         return error.GreeterUserNotFound;
     }
 
-    try opts.config.vt.normalize(process.io, process.environ_map);
+    try opts.config.vt.normalize(process.io);
 
     if (try shouldRunAutologin(opts.config)) {
-        defer opts.config.vt.normalize(process.io, process.environ_map) catch {};
+        defer opts.config.vt.normalize(process.io) catch {};
         if (Shutdown.shutdownRequested()) return;
         try runAutologin(process, exe_path, opts.config, &shutdown);
         if (Shutdown.shutdownRequested()) return;
     }
 
     while (true) {
-        defer opts.config.vt.normalize(process.io, process.environ_map) catch {};
+        defer opts.config.vt.normalize(process.io) catch {};
         if (Shutdown.shutdownRequested()) return;
 
         const spawned = try spawnWorkers(process, exe_path, opts.config, &shutdown);
@@ -215,7 +215,7 @@ fn runAutologin(
 
     if (autologin.timeout_seconds != 0) {
         try config.vt.activate(process.io);
-        var watcher = config.vt.watchInput(process.io, process.environ_map) catch |err| {
+        var watcher = config.vt.watchInput(process.io) catch |err| {
             if (Shutdown.shutdownRequested()) return;
             log.warn("Failed to watch for autologin interruption: {s}", .{@errorName(err)});
             return;

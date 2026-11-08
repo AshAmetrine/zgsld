@@ -107,7 +107,6 @@ pub const Session = struct {
         const session_child = try runSessionCommand(allocator, .{
             .io = opts.io,
             .shutdown_conn = opts.shutdown_conn,
-            .env_map = opts.host_env_map,
             .cmd = opts.session_info.command,
             .environ = session_environ.slice,
             .user_info = opts.user_info,
@@ -125,7 +124,6 @@ pub const Session = struct {
     const SessionCommandOpts = struct {
         io: std.Io,
         shutdown_conn: *Shutdown.Connection,
-        env_map: *const std.process.Environ.Map,
         cmd: ipc.SessionCommand,
         user_info: UserInfo,
         home_dir: ?[]const u8,
@@ -146,7 +144,7 @@ pub const Session = struct {
         const wrapper = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shell_cmd.ptr };
 
         // The session VT is already active. Reactivation would reset Xorg's VT mode.
-        const tty_file = try opts.vt.openDevice(opts.io, opts.env_map, .read_write);
+        const tty_file = try opts.vt.openDevice(opts.io, .read_write);
         defer tty_file.close(opts.io);
         const groups = try utils.getGroups(allocator, opts.user_info);
         defer allocator.free(groups);

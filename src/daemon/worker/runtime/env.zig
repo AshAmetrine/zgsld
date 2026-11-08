@@ -22,7 +22,7 @@ pub fn applyPamUserSessionEnv(
 
     // Add pam env list to the envmap (overwrites)
     try pam.addEnvListToMap(session_envmap);
-    if (vt == .unmanaged and vt.ttyNumber(io, host_env_map) == null) {
+    if (vt == .unmanaged and vt.ttyNumber(io) == null) {
         _ = session_envmap.swapRemove("XDG_SEAT");
         _ = session_envmap.swapRemove("XDG_VTNR");
     }
@@ -36,7 +36,7 @@ pub fn openPamSession(
     vt: Vt,
     comptime session_class: enum { greeter, user },
 ) !void {
-    const vt_num = vt.ttyNumber(io, host_env_map);
+    const vt_num = vt.ttyNumber(io);
     if (vt_num) |number| {
         var vt_buf: [3]u8 = undefined;
         const vt_value = try std.fmt.bufPrint(&vt_buf, "{d}", .{number});

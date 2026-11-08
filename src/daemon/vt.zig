@@ -2,6 +2,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("c");
 
+const platform = switch (builtin.os.tag) {
+    .linux => @import("vt/linux.zig"),
+    .freebsd => @import("vt/freebsd.zig"),
+    else => @compileError("Unsupported platform"),
+};
+
 const log = std.log.scoped(.zgsld);
 extern "c" fn getsid(pid: std.posix.pid_t) std.posix.pid_t;
 extern "c" fn ttyname_r(fd: std.posix.fd_t, buf: [*]u8, buflen: usize) c_int;
@@ -24,19 +30,18 @@ pub const Vt = union(enum) {
         return .{ .number = number };
     }
 
-    pub fn ttyNumber(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) ?u8 {
-        _ = env_map;
+    pub fn ttyNumber(self: Vt, io: std.Io) ?u8 {
         return switch (self) {
             .number => |vt_num| vt_num,
             .current => queryCurrentTtyNumber(io) catch blk: {
                 var path_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const tty_path = getInheritedTtyDevicePath(&path_buf) catch break :blk null;
-                break :blk parseTtyNumberFromPath(tty_path) catch null;
+                break :blk platform.parseTtyNumberFromPath(tty_path) catch null;
             },
             .unmanaged => blk: {
                 var path_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const tty_path = getInheritedTtyDevicePath(&path_buf) catch break :blk null;
-                break :blk parseTtyNumberFromPath(tty_path) catch null;
+                break :blk platform.parseTtyNumberFromPath(tty_path) catch null;
             },
         };
     }
@@ -46,37 +51,30 @@ pub const Vt = union(enum) {
             .number => |vt_num| vt_num,
             .unmanaged, .current => return,
         };
-
-        return switch (builtin.os.tag) {
-            .linux => linux.activate(io, vt_num),
-            .freebsd => freebsd.activate(io, vt_num),
-            else => error.UnsupportedPlatform,
-        };
+        try platform.activate(io, vt_num);
     }
 
-    pub fn open(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
+    pub fn open(self: Vt, io: std.Io, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
         return switch (self) {
             .unmanaged, .current => openControllingTty(io, mode),
-            .number => self.openDevice(io, env_map, mode),
+            .number => self.openDevice(io, mode),
         };
     }
 
-    pub fn openDevice(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
+    pub fn openDevice(self: Vt, io: std.Io, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = try self.resolveTtyDevicePath(io, env_map, &path_buf);
+        const tty_path = try self.resolveTtyDevicePath(io, &path_buf);
         return std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = mode });
     }
 
     pub fn resolveTtyDevicePath(
         self: Vt,
         io: std.Io,
-        env_map: *const std.process.Environ.Map,
         buf: *[std.fs.max_path_bytes]u8,
     ) ![:0]const u8 {
-        _ = env_map;
         switch (self) {
             .number => |vt_num| {
-                if (getTtyDevicePath(buf, vt_num)) |tty_path| {
+                if (platform.getTtyDevicePath(buf, vt_num)) |tty_path| {
                     return tty_path;
                 } else |err| {
                     log.warn("Failed to resolve configured tty device path: {s}", .{@errorName(err)});
@@ -84,7 +82,7 @@ pub const Vt = union(enum) {
             },
             .current => {
                 if (queryCurrentTtyNumber(io)) |vt_num| {
-                    if (getTtyDevicePath(buf, vt_num)) |tty_path| {
+                    if (platform.getTtyDevicePath(buf, vt_num)) |tty_path| {
                         return tty_path;
                     } else |err| {
                         log.warn("Failed to resolve current tty device path: {s}", .{@errorName(err)});
@@ -105,16 +103,16 @@ pub const Vt = union(enum) {
         return error.InvalidTtyPath;
     }
 
-    pub fn normalize(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !void {
+    pub fn normalize(self: Vt, io: std.Io) !void {
         try self.activate(io);
-        if (self != .unmanaged) try self.setTextMode(io, env_map);
-        self.resetTermios(io, env_map);
+        if (self != .unmanaged) try self.setTextMode(io);
+        self.resetTermios(io);
     }
 
-    pub fn openSessionTty(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !std.Io.File {
+    pub fn openSessionTty(self: Vt, io: std.Io) !std.Io.File {
         try self.activate(io);
 
-        var tty_file = try self.openDevice(io, env_map, .read_write);
+        var tty_file = try self.openDevice(io, .read_write);
         errdefer if (tty_file.handle > 2) tty_file.close(io);
 
         if (!controllingTtyIsCurrentSession(tty_file.handle)) {
@@ -124,22 +122,20 @@ pub const Vt = union(enum) {
         return tty_file;
     }
 
-    pub fn watchInput(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !InputWatcher {
-        return InputWatcher.init(self, io, env_map);
+    pub fn watchInput(self: Vt, io: std.Io) !InputWatcher {
+        return InputWatcher.init(self, io);
     }
 
-    fn setTextMode(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !void {
+    fn setTextMode(self: Vt, io: std.Io) !void {
         if (comptime builtin.os.tag != .linux) return;
 
-        var tty_file = try self.open(io, env_map, .read_write);
+        var tty_file = try self.open(io, .read_write);
         defer if (tty_file.handle > 2) tty_file.close(io);
-
-        const status = c.ioctl(tty_file.handle, c.KDSETMODE, @as(c_int, c.KD_TEXT));
-        if (status != 0) return error.FailedToSetTextMode;
+        try platform.setTextMode(tty_file.handle);
     }
 
-    fn resetTermios(self: Vt, io: std.Io, env_map: *const std.process.Environ.Map) void {
-        var tty_file = self.open(io, env_map, .read_write) catch return;
+    fn resetTermios(self: Vt, io: std.Io) void {
+        var tty_file = self.open(io, .read_write) catch return;
         defer if (tty_file.handle > 2) tty_file.close(io);
 
         var termios = tcgetattr(tty_file.handle) catch return;
@@ -151,8 +147,8 @@ pub const Vt = union(enum) {
         file: std.Io.File,
         original: c.struct_termios,
 
-        pub fn init(target_vt: Vt, io: std.Io, env_map: *const std.process.Environ.Map) !InputWatcher {
-            var tty_file = try target_vt.open(io, env_map, .read_write);
+        pub fn init(target_vt: Vt, io: std.Io) !InputWatcher {
+            var tty_file = try target_vt.open(io, .read_write);
             errdefer tty_file.close(io);
 
             const original = try tcgetattr(tty_file.handle);
@@ -229,16 +225,6 @@ fn getInheritedTtyDevicePath(buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     return error.NoInheritedTty;
 }
 
-fn getTtyDevicePath(buf: *[std.fs.max_path_bytes]u8, target_vt: u8) ![:0]const u8 {
-    if (target_vt == 0) return error.InvalidTty;
-
-    return switch (builtin.os.tag) {
-        .linux => std.fmt.bufPrintSentinel(buf, "/dev/tty{d}", .{target_vt}, 0),
-        .freebsd => std.fmt.bufPrintSentinel(buf, "/dev/ttyv{x}", .{target_vt - 1}, 0),
-        else => error.UnsupportedPlatform,
-    };
-}
-
 fn ttyPathFromFd(fd: std.posix.fd_t, buf: *[std.fs.max_path_bytes]u8) ![:0]const u8 {
     const rc = ttyname_r(fd, @ptrCast(buf), buf.len);
     if (rc != 0) return std.posix.unexpectedErrno(@fromBackingInt(@intCast(rc)));
@@ -248,112 +234,10 @@ fn ttyPathFromFd(fd: std.posix.fd_t, buf: *[std.fs.max_path_bytes]u8) ![:0]const
 }
 
 fn queryCurrentTtyNumber(io: std.Io) !u8 {
-    return switch (builtin.os.tag) {
-        .linux => linux.queryCurrentTtyNumber(io),
-        .freebsd => freebsd.queryCurrentTtyNumber(io),
-        else => error.UnsupportedPlatform,
-    };
-}
+    var tty_file = try openControllingTty(io, .read_only);
+    defer if (tty_file.handle > 2) tty_file.close(io);
 
-fn parseTtyNumberFromPath(tty_path: []const u8) !u8 {
-    return switch (builtin.os.tag) {
-        .linux => linux.parseTtyNumberFromPath(tty_path),
-        .freebsd => freebsd.parseTtyNumberFromPath(tty_path),
-        else => error.UnsupportedPlatform,
-    };
-}
-
-const linux = struct {
-    fn activate(io: std.Io, vt_num: u8) !void {
-        var console = try openVtControlDevice(io);
-        defer console.close(io);
-
-        var setactivate = std.mem.zeroes(c.struct_vt_setactivate);
-        setactivate.console = vt_num;
-        setactivate.mode.mode = c.VT_AUTO;
-        const status = c.ioctl(console.handle, c.VT_SETACTIVATE, &setactivate);
-        if (status != 0) return error.FailedToActivateTty;
-
-        const wait_status = c.ioctl(console.handle, c.VT_WAITACTIVE, @as(c_int, vt_num));
-        if (wait_status != 0) return error.FailedToWaitForActiveTty;
-    }
-
-    fn queryCurrentTtyNumber(io: std.Io) !u8 {
-        var tty_file = try openControllingTty(io, .read_only);
-        defer if (tty_file.handle > 2) tty_file.close(io);
-
-        var state = std.mem.zeroes(c.struct_vt_stat);
-        const status = c.ioctl(tty_file.handle, c.VT_GETSTATE, &state);
-        if (status != 0) return error.FailedToGetTtyState;
-
-        return std.math.cast(u8, state.v_active) orelse error.InvalidTty;
-    }
-
-    fn parseTtyNumberFromPath(tty_path: []const u8) !u8 {
-        const prefix = "/dev/tty";
-        if (!std.mem.startsWith(u8, tty_path, prefix)) return error.InvalidTtyPath;
-
-        const suffix = tty_path[prefix.len..];
-        if (suffix.len == 0) return error.InvalidTtyPath;
-
-        const tty_number = try std.fmt.parseInt(u8, suffix, 10);
-        if (tty_number == 0) return error.InvalidTty;
-        return tty_number;
-    }
-};
-
-const freebsd = struct {
-    fn activate(io: std.Io, vt_num: u8) !void {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = try getTtyDevicePath(&path_buf, vt_num);
-        // FreeBSD requires the target VT to remain open while switching to it.
-        var tty_file = try std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = .read_write });
-        defer tty_file.close(io);
-
-        var mode = std.mem.zeroes(c.struct_vt_mode);
-        mode.mode = c.VT_AUTO;
-        const mode_status = c.ioctl(tty_file.handle, c.VT_SETMODE, &mode);
-        if (mode_status != 0) return error.FailedToSetTtyMode;
-
-        const status = c.ioctl(tty_file.handle, c.VT_ACTIVATE, @as(c_int, vt_num));
-        if (status != 0) return error.FailedToActivateTty;
-
-        const wait_status = c.ioctl(tty_file.handle, c.VT_WAITACTIVE, @as(c_int, vt_num));
-        if (wait_status != 0) return error.FailedToWaitForActiveTty;
-    }
-
-    fn queryCurrentTtyNumber(io: std.Io) !u8 {
-        var tty_file = try openControllingTty(io, .read_only);
-        defer if (tty_file.handle > 2) tty_file.close(io);
-
-        var tty_index: c_int = 0;
-        const status = c.ioctl(tty_file.handle, c.VT_GETINDEX, &tty_index);
-        if (status != 0) return error.FailedToGetTtyIndex;
-
-        // VT_GETINDEX is already one-based, unlike /dev/ttyv names.
-        const number = std.math.cast(u8, tty_index) orelse return error.InvalidTty;
-        if (number == 0) return error.InvalidTty;
-        return number;
-    }
-
-    fn parseTtyNumberFromPath(tty_path: []const u8) !u8 {
-        const prefix = "/dev/ttyv";
-        if (!std.mem.startsWith(u8, tty_path, prefix)) return error.InvalidTtyPath;
-
-        const suffix = tty_path[prefix.len..];
-        if (suffix.len == 0) return error.InvalidTtyPath;
-
-        const tty_index = try std.fmt.parseInt(u8, suffix, 16);
-        return std.math.add(u8, tty_index, 1) catch error.InvalidTty;
-    }
-};
-
-fn openVtControlDevice(io: std.Io) !std.Io.File {
-    return switch (builtin.os.tag) {
-        .linux => std.Io.Dir.openFileAbsolute(io, "/dev/tty0", .{ .mode = .read_write }),
-        .freebsd => std.Io.Dir.openFileAbsolute(io, "/dev/console", .{ .mode = .read_write }),
-        else => error.UnsupportedPlatform,
-    };
+    return platform.queryCurrentTtyNumber(tty_file.handle);
 }
 
 fn openControllingTty(io: std.Io, mode: std.Io.Dir.OpenFileOptions.Mode) !std.Io.File {

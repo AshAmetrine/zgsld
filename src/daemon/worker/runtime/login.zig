@@ -100,7 +100,6 @@ pub fn run(opts: RunOpts) !void {
                 var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const tty_path = opts.vt.resolveTtyDevicePath(
                     opts.io,
-                    opts.env_map,
                     &tty_path_buf,
                 ) catch |err| {
                     try reportInternalError(&pam_ctx, err);
@@ -250,9 +249,9 @@ fn runSession(
         defer session_envmap.deinit();
         const session_vt = try session_mod.resolveSessionVt(info.session_type, env_map, vt);
         var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tty_path = try session_vt.resolveTtyDevicePath(io, env_map, &tty_path_buf);
+        const tty_path = try session_vt.resolveTtyDevicePath(io, &tty_path_buf);
         try pam.setItem(.tty, tty_path);
-        const tty_file = try session_vt.openSessionTty(io, env_map);
+        const tty_file = try session_vt.openSessionTty(io);
         errdefer if (tty_file.handle > 2) tty_file.close(io);
 
         const session = try session_mod.start(

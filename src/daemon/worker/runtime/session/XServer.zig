@@ -54,7 +54,7 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
     const environ = try opts.envmap.createPosixBlock(startup_allocator, .{});
 
     var vt_buf: [6]u8 = undefined;
-    const vt: ?[:0]const u8 = if (opts.vt.ttyNumber(opts.io, opts.host_env_map)) |vt_num|
+    const vt: ?[:0]const u8 = if (opts.vt.ttyNumber(opts.io)) |vt_num|
         try std.fmt.bufPrintSentinel(&vt_buf, "vt{d}", .{vt_num}, 0)
     else
         null;
@@ -90,7 +90,7 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
         if (vt) |arg| arg.ptr else null,
     };
 
-    const tty_file = try opts.vt.openDevice(opts.io, opts.host_env_map, .read_write);
+    const tty_file = try opts.vt.openDevice(opts.io, .read_write);
     defer tty_file.close(opts.io);
     const groups = try utils.getGroups(allocator, opts.user);
     defer allocator.free(groups);
