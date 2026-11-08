@@ -27,12 +27,6 @@ const XauthRootDir = struct {
     dir: std.Io.Dir,
 };
 
-fn mcookie(io: std.Io) ![16]u8 {
-    var cookie: [16]u8 = undefined;
-    try io.randomSecure(&cookie);
-    return cookie;
-}
-
 pub fn createXauthEntry(
     io: std.Io,
     path_buf: []u8,
@@ -47,7 +41,9 @@ pub fn createXauthEntry(
     errdefer std.Io.Dir.deleteFileAbsolute(io, xauth_file.path) catch {};
     defer xauth_file.file.close(io);
 
-    const magic_cookie = try mcookie(io);
+    var magic_cookie: [16]u8 = undefined;
+    defer std.crypto.secureZero(u8, &magic_cookie);
+    try io.randomSecure(&magic_cookie);
     var hostname_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
     const hostname = try std.posix.gethostname(&hostname_buf);
 
@@ -60,6 +56,7 @@ pub fn createXauthEntry(
     };
 
     var file_w_buf: [1024]u8 = undefined;
+    defer std.crypto.secureZero(u8, &file_w_buf);
     var writer = xauth_file.file.writer(io, &file_w_buf);
 
     try auth.writeAll(&writer.interface);
@@ -77,12 +74,19 @@ fn resolveXauthDir(
 ) !XauthRootDir {
     if (runtime_dir_opt) |runtime_dir_raw| {
         const runtime_dir = std.mem.trimEnd(u8, runtime_dir_raw, "/");
-        if (runtime_dir.len != 0) {
+        if (runtime_dir.len != 0 and std.fs.path.isAbsolute(runtime_dir)) {
             if (std.Io.Dir.openDirAbsolute(io, runtime_dir, .{ .follow_symlinks = false })) |dir| {
-                return .{
-                    .path = runtime_dir,
-                    .dir = dir,
+                const metadata = utils.getDirMetadata(dir) catch {
+                    dir.close(io);
+                    return error.UnsafePathOwnership;
                 };
+                if (metadata.uid == uid and metadata.mode & 0o777 == 0o700) {
+                    return .{
+                        .path = runtime_dir,
+                        .dir = dir,
+                    };
+                }
+                dir.close(io);
             } else |_| {}
         }
     }

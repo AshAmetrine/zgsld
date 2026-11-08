@@ -67,7 +67,7 @@ pub fn ensureOwnedDirAt(
     if (created) {
         try dir.setOwner(io, uid, gid);
     } else {
-        const owner = try getOwner(dir);
+        const owner = try getDirMetadata(dir);
         if (owner.uid != uid or owner.gid != gid) {
             return error.UnsafePathOwnership;
         }
@@ -76,7 +76,11 @@ pub fn ensureOwnedDirAt(
     return dir;
 }
 
-fn getOwner(dir: std.Io.Dir) !struct { uid: std.posix.uid_t, gid: std.posix.gid_t } {
+pub fn getDirMetadata(dir: std.Io.Dir) !struct {
+    uid: std.posix.uid_t,
+    gid: std.posix.gid_t,
+    mode: std.posix.mode_t,
+} {
     switch (comptime builtin.os.tag) {
         .linux => {
             const linux = std.os.linux;
@@ -85,12 +89,12 @@ fn getOwner(dir: std.Io.Dir) !struct { uid: std.posix.uid_t, gid: std.posix.gid_
                 dir.handle,
                 "",
                 linux.AT.EMPTY_PATH,
-                .{ .UID = true, .GID = true },
+                .{ .UID = true, .GID = true, .MODE = true },
                 &statx,
             ))) {
                 .SUCCESS => {
-                    if (!statx.mask.UID or !statx.mask.GID) return error.Unexpected;
-                    return .{ .uid = statx.uid, .gid = statx.gid };
+                    if (!statx.mask.UID or !statx.mask.GID or !statx.mask.MODE) return error.Unexpected;
+                    return .{ .uid = statx.uid, .gid = statx.gid, .mode = statx.mode };
                 },
                 else => |err| return std.posix.unexpectedErrno(err),
             }
@@ -99,7 +103,7 @@ fn getOwner(dir: std.Io.Dir) !struct { uid: std.posix.uid_t, gid: std.posix.gid_
             var stat: std.c.Stat = undefined;
             const rc = std.c.fstat(dir.handle, &stat);
             switch (std.c.errno(rc)) {
-                .SUCCESS => return .{ .uid = stat.uid, .gid = stat.gid },
+                .SUCCESS => return .{ .uid = stat.uid, .gid = stat.gid, .mode = stat.mode },
                 else => |err| return std.posix.unexpectedErrno(err),
             }
         },
