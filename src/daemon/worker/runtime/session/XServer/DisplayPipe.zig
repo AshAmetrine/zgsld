@@ -1,5 +1,6 @@
 const std = @import("std");
 const signals = @import("../../signals.zig");
+const Shutdown = @import("../../../../Shutdown.zig");
 const DisplayPipe = @This();
 
 read_file: std.Io.File,
@@ -30,7 +31,13 @@ pub fn prepareChild(self: *const DisplayPipe) void {
     if (std.c.fcntl(fd, std.posix.F.SETFD, @as(c_int, 0)) < 0) std.c._exit(1);
 }
 
-pub fn wait(self: *const DisplayPipe, io: std.Io, display: u8, timeout_ms: u32) !void {
+pub fn wait(
+    self: *const DisplayPipe,
+    io: std.Io,
+    shutdown_conn: *const Shutdown.Connection,
+    display: u8,
+    timeout_ms: u32,
+) !void {
     std.debug.assert(self.write_file == null);
     const deadline = std.Io.Clock.awake.now(io).addDuration(.fromMilliseconds(timeout_ms));
     var expected_buf: [4]u8 = undefined;
@@ -39,6 +46,7 @@ pub fn wait(self: *const DisplayPipe, io: std.Io, display: u8, timeout_ms: u32) 
     var used: usize = 0;
     var fds = [_]std.c.pollfd{
         .{ .fd = self.read_file.handle, .events = std.c.POLL.IN, .revents = 0 },
+        .{ .fd = shutdown_conn.file.handle, .events = 0, .revents = 0 },
     };
     while (true) {
         if (signals.shutdownRequested()) return error.Shutdown;
@@ -50,6 +58,9 @@ pub fn wait(self: *const DisplayPipe, io: std.Io, display: u8, timeout_ms: u32) 
         if (rc < 0) {
             if (std.c.errno(rc) == .INTR) continue;
             return std.posix.unexpectedErrno(std.c.errno(rc));
+        }
+        if (fds[1].revents & (std.c.POLL.HUP | std.c.POLL.ERR | std.c.POLL.NVAL) != 0) {
+            return error.Shutdown;
         }
         if (fds[0].revents & (std.c.POLL.ERR | std.c.POLL.NVAL) != 0) {
             return error.DisplayReadFailed;

@@ -105,7 +105,7 @@ pub fn spawn(allocator: std.mem.Allocator, opts: Options) !XServer {
     var server = Shutdown.Connection.childFromPid(pid);
     errdefer opts.shutdown_conn.stop(&server, .x11);
 
-    const ready_result = ready.wait(opts.io, display_num, 5000);
+    const ready_result = ready.wait(opts.io, opts.shutdown_conn, display_num, 5000);
     if (hasExited(pid)) {
         server.id = null;
         try opts.shutdown_conn.exited(.x11);

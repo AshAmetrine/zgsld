@@ -122,9 +122,34 @@ pub fn fork(self: *Connection, role: Role) !std.posix.pid_t {
 }
 
 pub fn wait(self: *Connection, child: *std.process.Child, role: Role) !void {
-    if (child.id == null) return;
-    _ = try child.wait(self.io);
-    try self.exited(role);
+    const pid = child.id orelse return;
+    var fds = [_]std.c.pollfd{
+        .{ .fd = self.file.handle, .events = 0, .revents = 0 },
+    };
+    while (true) {
+        const rc = std.c.waitpid(pid, null, std.posix.W.NOHANG);
+        if (rc == pid) {
+            child.id = null;
+            try self.exited(role);
+            return;
+        }
+        if (rc < 0) {
+            if (std.c.errno(rc) == .INTR) continue;
+            return std.posix.unexpectedErrno(std.c.errno(rc));
+        }
+
+        // A dead manager cannot stop children for us. Do not consume protocol replies.
+        const ready = std.c.poll(&fds, fds.len, 100);
+        if (ready < 0) {
+            if (std.c.errno(ready) == .INTR) continue;
+            return std.posix.unexpectedErrno(std.c.errno(ready));
+        }
+        if (fds[0].revents & (std.c.POLL.HUP | std.c.POLL.ERR | std.c.POLL.NVAL) != 0) {
+            _ = std.c.kill(pid, .KILL);
+            _ = try child.wait(self.io);
+            return error.Shutdown;
+        }
+    }
 }
 
 pub fn exited(self: *Connection, role: Role) !void {
