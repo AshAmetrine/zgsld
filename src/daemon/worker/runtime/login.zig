@@ -78,103 +78,123 @@ pub fn run(opts: RunOpts) !void {
                     .ipc_conn = ipc_conn,
                 };
 
-                const user_z = opts.allocator.dupeSentinel(u8, auth.user, 0) catch |err| {
-                    try reportInternalError(&pam_ctx, err);
-                    continue;
+                const conv_state: Pam(PamCtx).ConvState = .{
+                    .conv = pam_conv.loginConv,
+                    .ctx = &pam_ctx,
                 };
-                defer opts.allocator.free(user_z);
-
-                var pam = Pam(PamCtx).init(opts.allocator, .{
-                    .service_name = opts.service_name,
-                    .user = user_z,
-                    .state = &.{
-                        .conv = pam_conv.loginConv,
-                        .ctx = &pam_ctx,
-                    },
-                }) catch |err| {
-                    try reportInternalError(&pam_ctx, err);
+                var pam = initPam(opts, auth.user, &conv_state) catch |err| {
+                    _ = try reportAuthError(&pam_ctx, .setup, err);
                     continue;
                 };
                 defer pam.deinit();
 
-                var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const tty_path = opts.vt.resolveTtyDevicePath(
-                    opts.io,
-                    &tty_path_buf,
-                ) catch |err| {
-                    try reportInternalError(&pam_ctx, err);
+                authenticate(&pam, &pam_ctx) catch |err| {
+                    switch (try reportAuthError(&pam_ctx, .credentials, err)) {
+                        .retry => {},
+                        .cancelled => cancelled = true,
+                    }
                     continue;
-                };
-                pam.setItem(.tty, tty_path) catch |err| {
-                    try reportInternalError(&pam_ctx, err);
-                    continue;
-                };
-
-                authenticate(&pam, &pam_ctx) catch |err| switch (err) {
-                    error.AuthCancelled => {
-                        cancelled = true;
-                        continue;
-                    },
-                    error.ConversationFailed => {
-                        const conv_err = pam_ctx.conv_error.?;
-                        if (conv_err != error.OutOfMemory) return conv_err;
-                        try reportInternalError(&pam_ctx, conv_err);
-                        continue;
-                    },
-                    error.AuthError,
-                    error.UserUnknown,
-                    error.PermissionDenied,
-                    error.AccountExpired,
-                    error.MaximumTries,
-                    error.CredentialsExpired,
-                    error.CredentialsInsufficient,
-                    => {
-                        try writeAuthResult(&pam_ctx, false);
-                        continue;
-                    },
-                    else => {
-                        try reportInternalError(&pam_ctx, err);
-                        continue;
-                    },
                 };
                 try writeAuthResult(&pam_ctx, true);
 
-                var session = blk: {
-                    var session_setup = (getSession(
-                        opts.allocator,
-                        ipc_conn,
-                        &event_buf,
-                    ) catch |err| {
-                        if (err == error.EndOfStream and signals.shutdownRequested()) return;
-                        return err;
-                    }) orelse {
-                        cancelled = true;
-                        continue;
-                    };
-                    defer session_setup.env.deinit();
-                    if (signals.shutdownRequested()) return;
-                    opts.ipc_socket.close(opts.io);
-                    ipc_closed = true;
-                    break :blk try startSession(
-                        opts.allocator,
-                        opts.io,
-                        opts.shutdown_conn,
-                        opts.env_map,
-                        session_setup.info,
-                        &pam,
-                        &session_setup.env,
-                        opts.vt,
-                    );
-                };
-                defer session.deinit(opts.io);
-
-                log.debug("Waiting for session to end...", .{});
-                try session.wait();
-                return;
+                switch (try runSession(opts, ipc_conn, &pam, &event_buf, &ipc_closed)) {
+                    .cancelled => cancelled = true,
+                    .finished => return,
+                }
             },
             else => return error.UnexpectedEvent,
         }
     }
+}
+
+fn initPam(
+    opts: RunOpts,
+    user: [:0]const u8,
+    state: *const Pam(PamCtx).ConvState,
+) !Pam(PamCtx) {
+    var pam = try Pam(PamCtx).init(opts.allocator, .{
+        .service_name = opts.service_name,
+        .user = user,
+        .state = state,
+    });
+    errdefer pam.deinit();
+
+    var tty_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tty_path = try opts.vt.resolveTtyDevicePath(opts.io, &tty_path_buf);
+    try pam.setItem(.tty, tty_path);
+    return pam;
+}
+
+const AuthFailure = enum { retry, cancelled };
+const AuthPhase = enum { setup, credentials };
+
+fn reportAuthError(ctx: *PamCtx, phase: AuthPhase, err: anyerror) !AuthFailure {
+    var failure = err;
+    if (phase == .credentials) {
+        if (err == error.AuthCancelled) return .cancelled;
+        if (ctx.conv_error) |conv_err| {
+            if (conv_err != error.OutOfMemory) return conv_err;
+            failure = conv_err;
+        }
+        switch (failure) {
+            error.AuthError,
+            error.UserUnknown,
+            error.PermissionDenied,
+            error.AccountExpired,
+            error.MaximumTries,
+            error.CredentialsExpired,
+            error.CredentialsInsufficient,
+            => {
+                try writeAuthResult(ctx, false);
+                return .retry;
+            },
+            else => {},
+        }
+    }
+    try reportInternalError(ctx, failure);
+    return .retry;
+}
+
+const SessionResult = enum { cancelled, finished };
+
+fn runSession(
+    opts: RunOpts,
+    ipc_conn: *ipc.Connection,
+    pam: *Pam(PamCtx),
+    event_buf: *[ipc.event_buf_size]u8,
+    ipc_closed: *bool,
+) !SessionResult {
+    var session = blk: {
+        var session_setup = (getSession(
+            opts.allocator,
+            ipc_conn,
+            event_buf,
+        ) catch |err| {
+            if (err == error.EndOfStream and signals.shutdownRequested()) return .finished;
+            return err;
+        }) orelse {
+            return .cancelled;
+        };
+        defer session_setup.env.deinit();
+        if (signals.shutdownRequested()) return .finished;
+        opts.ipc_socket.close(opts.io);
+        ipc_closed.* = true;
+        break :blk try startSession(
+            opts.allocator,
+            opts.io,
+            opts.shutdown_conn,
+            opts.env_map,
+            session_setup.info,
+            pam,
+            &session_setup.env,
+            opts.vt,
+        );
+    };
+    defer session.deinit(opts.io);
+
+    log.debug("Waiting for session to end...", .{});
+    try session.wait();
+    return .finished;
 }
 
 fn authenticate(pam: *Pam(PamCtx), ctx: *PamCtx) !void {
