@@ -8,7 +8,9 @@ pub const preview = @import("preview");
 
 /// Helpers for desktop files
 pub const desktop = @import("greeter/desktop.zig");
+pub const users = @import("greeter/users.zig");
 
 test {
     _ = desktop;
+    _ = users;
 }
