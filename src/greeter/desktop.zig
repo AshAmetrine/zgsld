@@ -1,4 +1,5 @@
 const std = @import("std");
+pub const Entry = @import("desktop/Entry.zig");
 
 /// Iterator for desktop files within a directory
 pub const Iterator = struct {
@@ -43,4 +44,8 @@ test "Iterator only returns desktop files" {
     var it = Iterator.init(tmp.dir);
     try std.testing.expectEqualStrings("test.desktop", (try it.next(io)).?);
     try std.testing.expect(try it.next(io) == null);
+}
+
+test {
+    _ = @import("desktop/parser.zig");
 }
