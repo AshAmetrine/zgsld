@@ -91,6 +91,10 @@ pub fn build(b: *std.Build) !void {
         },
     };
     const daemon = b.addModule("daemon", daemon_options);
+    const goose = b.dependency("goose", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const greeter_options: std.Build.Module.CreateOptions = .{
         .root_source_file = b.path("src/greeter.zig"),
         .target = target,
@@ -100,6 +104,7 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "ipc", .module = ipc_mod },
             .{ .name = "common", .module = common },
             .{ .name = "preview", .module = preview },
+            .{ .name = "goose", .module = goose.module("goose") },
         },
     };
     const greeter = b.addModule("greeter", greeter_options);
@@ -121,10 +126,10 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    const pam = b.lazyDependency("zig_pam", .{
+    const pam = b.dependency("zig_pam", .{
         .target = target,
         .optimize = optimize,
-    }) orelse return;
+    });
     daemon.addImport("pam", pam.module("pam"));
 
     const test_step = b.step("test", "Run all tests.");

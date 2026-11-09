@@ -20,7 +20,10 @@
         .zig_pam = .{
             .url = "git+https://github.com/ashametrine/zig-pam#0f9ee9944a3d955ec4a26bea137871017e2c726f",
             .hash = "zig_pam-0.2.1--cHVhlRfAACBSPqUl7icb8Uxp7dbzuZiPWQNelNfi85_",
-            .lazy = true,
+        },
+        .goose = .{
+            .url = "git+https://github.com/luxluth/goose#d97a2cd849f8bfd9f07ad00fca896b677cc6ec50",
+            .hash = "goose-4.0.2-e9MzML9aBAAoACxMDD71qNLxfKFSWSNWg6wON_ODDnyR",
         },
     },
     .paths = .{
