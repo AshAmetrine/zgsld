@@ -6,6 +6,7 @@ const pam_conv = @import("pam_conv.zig");
 const session_mod = @import("session.zig");
 const signals = @import("signals.zig");
 const Runtime = @import("Runtime.zig");
+const locale = @import("locale.zig");
 
 const PamCtx = pam_conv.PamCtx;
 
@@ -91,7 +92,7 @@ const Login = struct {
                         .conv = pam_conv.loginConv,
                         .ctx = &pam_ctx,
                     };
-                    var pam = self.initPam(auth.user, &conv_state) catch |err| {
+                    var pam = self.initPam(auth.user, auth.locale, &conv_state) catch |err| {
                         _ = try reportAuthError(&pam_ctx, .setup, err);
                         continue;
                     };
@@ -119,8 +120,13 @@ const Login = struct {
     fn initPam(
         self: *Login,
         user: [:0]const u8,
+        requested_locale: ?[:0]const u8,
         state: *const Pam(PamCtx).ConvState,
     ) !Pam(PamCtx) {
+        try locale.restore(self.runtime.allocator, self.runtime.env_map);
+        if (requested_locale) |name| {
+            try locale.apply(name);
+        }
         var pam = try Pam(PamCtx).init(self.runtime.allocator, .{
             .service_name = self.service_name,
             .user = user,

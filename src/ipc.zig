@@ -89,6 +89,7 @@ pub const ErrorInfo = struct {
 pub const Event = union(enum) {
     pam_start_auth: struct {
         user: [:0]const u8,
+        locale: ?[:0]const u8 = null,
     },
     pam_message: PamMessage,
     pam_request: PamConvRequest,

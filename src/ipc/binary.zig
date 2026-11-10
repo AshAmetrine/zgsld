@@ -58,10 +58,16 @@ pub fn readEvent(
     event_buf[payload_len] = 0;
 
     return switch (header.tag) {
-        .pam_start_auth => .{
-            .pam_start_auth = .{
-                .user = event_buf[0..payload_len :0],
-            },
+        .pam_start_auth => blk: {
+            const separator = std.mem.indexOfScalar(u8, payload, 0) orelse
+                break :blk .{ .pam_start_auth = .{ .user = event_buf[0..payload_len :0] } };
+            if (std.mem.indexOfScalar(u8, payload[separator + 1 ..], 0) != null) {
+                return error.InvalidPayload;
+            }
+            break :blk .{ .pam_start_auth = .{
+                .user = event_buf[0..separator :0],
+                .locale = event_buf[separator + 1 .. payload_len :0],
+            } };
         },
         .login_cancel => blk: {
             if (payload_len != 0) return error.InvalidPayload;
@@ -136,9 +142,18 @@ pub fn readEvent(
 pub fn writeEvent(_: *ipc.Codec, io_writer: *std.Io.Writer, event: *const Event) !void {
     switch (event.*) {
         .pam_start_auth => |ev| {
-            const user_len: u32 = @intCast(ev.user.len);
-            try writeHeader(io_writer, .pam_start_auth, user_len);
+            if (std.mem.indexOfScalar(u8, ev.user, 0) != null) return error.InvalidPayload;
+            if (ev.locale) |locale| {
+                if (std.mem.indexOfScalar(u8, locale, 0) != null) return error.InvalidPayload;
+            }
+            const locale_len = if (ev.locale) |locale| locale.len + 1 else 0;
+            const payload_len: u32 = @intCast(ev.user.len + locale_len);
+            try writeHeader(io_writer, .pam_start_auth, payload_len);
             try io_writer.writeAll(ev.user);
+            if (ev.locale) |locale| {
+                try io_writer.writeByte(0);
+                try io_writer.writeAll(locale);
+            }
         },
         .login_cancel, .login_cancelled, .session_accepted => {
             try writeHeader(io_writer, std.meta.activeTag(event.*), 0);

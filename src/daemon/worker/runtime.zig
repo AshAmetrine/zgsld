@@ -1,5 +1,5 @@
 const std = @import("std");
-const builtin = @import("builtin");
+const locale = @import("runtime/locale.zig");
 const ipc = @import("ipc");
 const build_options = @import("build_options");
 const Runtime = @import("runtime/Runtime.zig");
@@ -49,10 +49,7 @@ pub fn run(
     environ_map: *const std.process.Environ.Map,
     opts: Options,
 ) !void {
-    // std.c.LC does not define values for FreeBSD.
-    // LC_ALL on FreeBSD is 0.
-    const category: std.c.LC = if (builtin.os.tag == .freebsd) @fromBackingInt(@intCast(0)) else .ALL;
-    if (std.c.setlocale(category, "") == null) {
+    if (std.c.setlocale(locale.all, "") == null) {
         log.warn("Failed to initialize locale", .{});
     }
     signals.installHandlers();
