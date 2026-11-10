@@ -50,12 +50,15 @@ pub fn startSession(
     try env_mod.preparePamUserEnv(T, pam, opts.env_map);
     try env_mod.preparePamSessionEnv(T, pam, self.io, self.env_map, opts.vt, .user);
     try pam.openSession(.{});
-    try env_mod.applyPamEnv(T, pam, opts.env_map, self.io, opts.vt);
-    try env_mod.applyTermEnv(opts.env_map, self.env_map);
-    const user_info = try env_mod.applyUserEnv(T, pam, opts.env_map);
+    var environment = std.process.Environ.Map.init(self.allocator);
+    defer environment.deinit();
+    try env_mod.applyPamEnv(T, pam, &environment, self.io, opts.vt);
+    try env_mod.applyTermEnv(&environment, self.env_map);
+    const user_info = try env_mod.applyUserEnv(T, pam, &environment);
     return self.spawnSession(.{
         .session_info = opts.info,
-        .envmap = opts.env_map,
+        .envmap = &environment,
+        .overrides = opts.env_map,
         .user_info = user_info,
         .vt = opts.vt,
         .tty_file = opts.tty_file,
@@ -65,6 +68,7 @@ pub fn startSession(
 const SpawnOpts = struct {
     session_info: ipc.SessionInfo,
     envmap: *std.process.Environ.Map,
+    overrides: ?*std.process.Environ.Map = null,
     user_info: UserInfo,
     vt: Vt,
     tty_file: std.Io.File,
@@ -95,7 +99,18 @@ pub fn spawnSession(self: *const Runtime, opts: SpawnOpts) !Session {
 
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const session_environ = try opts.envmap.createPosixBlock(arena.allocator(), .{});
+
+    // Overrides only affect the session environment.
+    const environment = opts.overrides orelse opts.envmap;
+    if (opts.overrides) |overrides| {
+        var it = opts.envmap.iterator();
+        while (it.next()) |entry| {
+            if (!overrides.contains(entry.key_ptr.*)) {
+                try overrides.put(entry.key_ptr.*, entry.value_ptr.*);
+            }
+        }
+    }
+    const session_environ = try environment.createPosixBlock(arena.allocator(), .{});
 
     const session_child = try self.runSessionCommand(.{
         .cmd = opts.session_info.command,

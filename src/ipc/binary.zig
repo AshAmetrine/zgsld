@@ -127,13 +127,12 @@ pub fn readEvent(
         },
         .set_session_env => blk: {
             const eq = std.mem.indexOfScalar(u8, payload, '=') orelse return error.InvalidPayload;
-            if (eq == 0) return error.InvalidPayload;
-            break :blk .{
-                .set_session_env = .{
-                    .key = payload[0..eq],
-                    .value = payload[eq + 1 ..],
-                },
+            const env: ipc.SessionEnvVar = .{
+                .key = payload[0..eq],
+                .value = payload[eq + 1 ..],
             };
+            try env.validate();
+            break :blk .{ .set_session_env = env };
         },
     };
 }
@@ -196,7 +195,7 @@ pub fn writeEvent(_: *ipc.Codec, io_writer: *std.Io.Writer, event: *const Event)
             try io_writer.writeAll(cmd.session_cmd);
         },
         .set_session_env => |env| {
-            if (std.mem.indexOfScalar(u8, env.key, '=') != null) return error.InvalidPayload;
+            try env.validate();
             const payload_len: u32 = @intCast(env.key.len + 1 + env.value.len);
             try writeHeader(io_writer, .set_session_env, payload_len);
             try io_writer.writeAll(env.key);

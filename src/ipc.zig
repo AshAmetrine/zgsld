@@ -37,6 +37,16 @@ pub const SessionInfo = struct {
 pub const SessionEnvVar = struct {
     key: []const u8,
     value: []const u8,
+
+    pub fn validate(self: SessionEnvVar) !void {
+        if (self.key.len == 0 or
+            std.mem.indexOfScalar(u8, self.key, '=') != null or
+            std.mem.indexOfScalar(u8, self.key, 0) != null or
+            std.mem.indexOfScalar(u8, self.value, 0) != null)
+        {
+            return error.InvalidPayload;
+        }
+    }
 };
 
 /// PAM prompt request sent from zgsld to greeter.

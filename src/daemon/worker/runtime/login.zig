@@ -12,13 +12,6 @@ const PamCtx = pam_conv.PamCtx;
 
 const log = std.log.scoped(.zgsld_worker);
 
-const SessionEnvKey = enum {
-    PATH,
-    XDG_SESSION_DESKTOP,
-    XDG_CURRENT_DESKTOP,
-    XDG_SESSION_TYPE,
-};
-
 pub const RunOpts = struct {
     service_name: [:0]const u8,
     ipc_socket: std.Io.File,
@@ -173,7 +166,7 @@ const Login = struct {
                     return null;
                 },
                 .set_session_env => |env| {
-                    if (std.meta.stringToEnum(SessionEnvKey, env.key) == null) continue;
+                    try env.validate();
                     try session_envmap.put(env.key, env.value);
                 },
                 .start_session => |info| {
