@@ -7,6 +7,11 @@ pub const User = struct {
     display_name: []const u8,
     shell: []const u8,
     avatar_path: ?[]const u8 = null,
+    language: ?[:0]const u8 = null,
+    session: ?[]const u8 = null,
+    session_type: ?[]const u8 = null,
+    login_frequency: ?u64 = null,
+    login_time: ?i64 = null,
 };
 
 pub const UserList = struct {
