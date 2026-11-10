@@ -47,11 +47,29 @@ fn createWorkerEnv(opts: SpawnOpts) !std.process.Environ.Map {
     var worker_envmap = std.process.Environ.Map.init(opts.allocator);
     errdefer worker_envmap.deinit();
 
-    for ([_][]const u8{ "PATH", "TERM" }) |key| {
+    const inherited_vars = [_][]const u8{
+        "PATH",
+        "TERM",
+        "LANG",
+        "LANGUAGE",
+        "LOCALE_ARCHIVE",
+        "LOCPATH",
+        "PATH_LOCALE",
+    };
+    for (inherited_vars) |key| {
         if (opts.env_map.get(key)) |value| {
             try worker_envmap.put(key, value);
         }
     }
+
+    var it = opts.env_map.iterator();
+    while (it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        if (std.mem.startsWith(u8, key, "LC_")) {
+            try worker_envmap.put(key, entry.value_ptr.*);
+        }
+    }
+
     const vt_num = opts.config.vt.ttyNumber(opts.io);
     // PAM also reads the process environment. A PTY must not inherit its outer seat.
     if (opts.config.vt != .unmanaged or vt_num != null) {

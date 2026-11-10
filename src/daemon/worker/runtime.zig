@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ipc = @import("ipc");
 const build_options = @import("build_options");
 const Runtime = @import("runtime/Runtime.zig");
@@ -11,6 +12,8 @@ const signals = @import("runtime/signals.zig");
 const Shutdown = @import("../Shutdown.zig");
 const Vt = @import("vt").Vt;
 const SessionClass = @import("process.zig").SessionClass;
+
+const log = std.log.scoped(.zgsld_worker);
 
 pub const Options = struct {
     session_class: SessionClass,
@@ -46,6 +49,12 @@ pub fn run(
     environ_map: *const std.process.Environ.Map,
     opts: Options,
 ) !void {
+    // std.c.LC does not define values for FreeBSD.
+    // LC_ALL on FreeBSD is 0.
+    const category: std.c.LC = if (builtin.os.tag == .freebsd) @fromBackingInt(@intCast(0)) else .ALL;
+    if (std.c.setlocale(category, "") == null) {
+        log.warn("Failed to initialize locale", .{});
+    }
     signals.installHandlers();
     const shutdown_raw = environ_map.get("ZGSLD_CONTROL") orelse
         return error.MissingControlFd;
