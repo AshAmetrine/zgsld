@@ -18,6 +18,9 @@ pub fn activate(io: std.Io, vt_num: u8) !void {
     var tty_file = try std.Io.Dir.openFileAbsolute(io, tty_path, .{ .mode = .read_write });
     defer tty_file.close(io);
 
+    var active: c_int = 0;
+    if (c.ioctl(tty_file.handle, c.VT_GETACTIVE, &active) == 0 and active == vt_num) return;
+
     var mode = std.mem.zeroes(c.struct_vt_mode);
     mode.mode = c.VT_AUTO;
     const mode_status = c.ioctl(tty_file.handle, c.VT_SETMODE, &mode);

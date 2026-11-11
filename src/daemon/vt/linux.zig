@@ -9,6 +9,9 @@ pub fn activate(io: std.Io, vt_num: u8) !void {
     var console = try openVtControlDevice(io);
     defer console.close(io);
 
+    const active = queryCurrentTtyNumber(console.handle) catch null;
+    if (active == vt_num) return;
+
     var setactivate = std.mem.zeroes(c.struct_vt_setactivate);
     setactivate.console = vt_num;
     setactivate.mode.mode = c.VT_AUTO;
