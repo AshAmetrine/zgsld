@@ -49,10 +49,22 @@ pub fn run(
     environ_map: *const std.process.Environ.Map,
     opts: Options,
 ) !void {
+    signals.installHandlers();
+    runWorker(gpa, io, environ_map, opts) catch |err| {
+        if (err == error.Shutdown or signals.shutdownRequested()) return;
+        return err;
+    };
+}
+
+fn runWorker(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    opts: Options,
+) !void {
     if (std.c.setlocale(locale.all, "") == null) {
         log.warn("Failed to initialize locale", .{});
     }
-    signals.installHandlers();
     const shutdown_raw = environ_map.get("ZGSLD_CONTROL") orelse
         return error.MissingControlFd;
     const shutdown_fd = try std.fmt.parseInt(std.posix.fd_t, shutdown_raw, 10);

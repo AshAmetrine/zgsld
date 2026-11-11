@@ -44,6 +44,18 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
     defer shutdown.deinit();
     try shutdown.start();
 
+    runSessions(process, opts, exe_path, &shutdown) catch |err| {
+        if (Shutdown.shutdownRequested()) return;
+        return err;
+    };
+}
+
+fn runSessions(
+    process: ProcessContext,
+    opts: RunOptions,
+    exe_path: []const u8,
+    shutdown: *Shutdown,
+) !void {
     if (!build_options.x11_support and opts.config.greeter.session_type == .x11) {
         log.err("Greeter X11 session type requested, but zgsld was built without X11 support", .{});
         return error.X11UnsupportedBuild;
@@ -59,7 +71,7 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
     if (try shouldRunAutologin(opts.config)) {
         defer opts.config.vt.normalize(process.io) catch {};
         if (Shutdown.shutdownRequested()) return;
-        try runAutologin(process, exe_path, opts.config, &shutdown);
+        try runAutologin(process, exe_path, opts.config, shutdown);
         if (Shutdown.shutdownRequested()) return;
     }
 
@@ -67,7 +79,7 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
         defer opts.config.vt.normalize(process.io) catch {};
         if (Shutdown.shutdownRequested()) return;
 
-        const spawned = try spawnWorkers(process, exe_path, opts.config, &shutdown);
+        const spawned = try spawnWorkers(process, exe_path, opts.config, shutdown);
         defer {
             shutdown.requestStop(spawned.greeter, 0);
             shutdown.requestStop(spawned.session, 0);
@@ -79,7 +91,7 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
             process.io,
             spawned.greeter_file,
             spawned.session_file,
-            &shutdown,
+            shutdown,
             spawned.greeter,
             spawned.session,
             opts.ipc_codec,
@@ -87,6 +99,7 @@ pub fn run(process: ProcessContext, opts: RunOptions) !void {
         try shutdown.waitChecked(spawned.greeter);
         shutdown.waitChecked(spawned.session) catch |err| switch (err) {
             error.WorkerError => {
+                if (Shutdown.shutdownRequested()) return;
                 log.err("Session worker failed; returning to greeter", .{});
             },
             else => return err,
@@ -185,6 +198,7 @@ fn runAutologin(
     defer shutdown.stop(autologin_proc);
 
     shutdown.waitChecked(autologin_proc) catch |err| {
+        if (Shutdown.shutdownRequested()) return;
         log.warn("Autologin failed: {s}", .{@errorName(err)});
     };
 }
