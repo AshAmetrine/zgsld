@@ -144,10 +144,6 @@ pub const Transport = struct {
     writer: *std.Io.Writer,
 };
 
-pub const Connector = struct {
-    connect: *const fn (*Connector) anyerror!Transport,
-};
-
 /// IPC event encoding and decoding over borrowed streams.
 pub const Connection = struct {
     const Self = @This();

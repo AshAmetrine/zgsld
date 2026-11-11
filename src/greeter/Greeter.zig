@@ -6,7 +6,7 @@ const daemon = if (build_options.embed_daemon) @import("daemon") else void;
 const ipc = @import("ipc");
 const preview = @import("preview");
 const PreviewRuntime = @import("../preview/Runtime.zig");
-const ZgsldConnector = @import("ZgsldConnector.zig");
+const Connector = @import("Connector.zig");
 
 const log = std.log.scoped(.zgsld);
 const Self = @This();
@@ -90,7 +90,7 @@ pub fn run(self: Self, opts: RunOptions) !void {
         return self.vtable.run(self.greeterContext(connection));
     }
 
-    var connector = ZgsldConnector.init(self.process);
+    var connector = Connector.Zgsld.init(self.process);
     defer connector.deinit();
     if (try connector.connect()) |transport| {
         var connection = ipc.Connection.init(transport, .{});
